@@ -3,6 +3,46 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+      (function () {
+        try {
+          var desc =
+            Object.getOwnPropertyDescriptor(window, 'fetch') ||
+            Object.getOwnPropertyDescriptor(Window.prototype, 'fetch');
+          if (desc && desc.get && !desc.set && desc.configurable !== false) {
+            var currentFetch = window.fetch.bind(window);
+            Object.defineProperty(window, 'fetch', {
+              configurable: true,
+              enumerable: true,
+              get: function () {
+                return currentFetch;
+              },
+              set: function (fn) {
+                if (typeof fn === 'function') {
+                  currentFetch = fn;
+                }
+              },
+            });
+          }
+        } catch (_) {}
+
+        window.addEventListener(
+          'error',
+          function (event) {
+            var filename = (event && event.filename) || '';
+            var msg = (event && event.message) || '';
+            if (
+              filename.indexOf('chrome-extension://') === 0 ||
+              msg.indexOf('Cannot set property fetch of #<Window>') !== -1
+            ) {
+              event.stopImmediatePropagation();
+              event.preventDefault();
+            }
+          },
+          true
+        );
+      })();
+    </script>
     <title>IndigoMill Ledger — Dyeing & Washing Mill Management</title>
     <meta name="description" content="Dyeing and Washing Mill management dashboard with Client Management and dynamic Firestore double-entry client_ledger due calculation." />
     <meta property="og:title" content="IndigoMill Ledger — Dyeing & Washing Mill Management" />
