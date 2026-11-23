@@ -1,0 +1,666 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Pillar 0: Global default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Global hardened primitives
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isOwner(ownerId) {
+      return isVerifiedUser() && ownerId == request.auth.uid;
+    }
+
+    function isPositiveBoundedNumber(val, maxVal) {
+      return (val is int || val is float) && val > 0 && val <= maxVal;
+    }
+
+    function isValidLedgerAmount(val) {
+      return (val is int || val is float) && val >= 0 && val <= 1000000000;
+    }
+
+    // Validation Blueprint: Client entity
+    function isValidClient(data) {
+      return data.keys().hasAll([
+          'ownerId',
+          'clientName',
+          'companyName',
+          'mobile',
+          'address',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId',
+          'clientName',
+          'companyName',
+          'mobile',
+          'address',
+          'createdAt',
+          'updatedAt'
+        ])
+        && isValidId(data.ownerId)
+        && data.ownerId == request.auth.uid
+        && data.clientName is string
+        && data.clientName.size() >= 1
+        && data.clientName.size() <= 120
+        && data.companyName is string
+        && data.companyName.size() >= 1
+        && data.companyName.size() <= 160
+        && data.mobile is string
+        && data.mobile.size() >= 5
+        && data.mobile.size() <= 25
+        && data.mobile.matches('^[+0-9 ()-]+$')
+        && data.address is string
+        && data.address.size() >= 1
+        && data.address.size() <= 300
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    // Validation Blueprint: ClientLedgerEntry entity (Debit increases due, Credit decreases due)
+    function isValidLedgerEntry(data) {
+      return data.keys().hasAll([
+          'ownerId',
+          'clientId',
+          'txn_type',
+          'debit',
+          'credit',
+          'note',
+          'reference',
+          'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId',
+          'clientId',
+          'txn_type',
+          'debit',
+          'credit',
+          'note',
+          'reference',
+          'createdAt'
+        ])
+        && isValidId(data.ownerId)
+        && data.ownerId == request.auth.uid
+        && isValidId(data.clientId)
+        && data.txn_type is string
+        && data.txn_type.size() >= 1
+        && data.txn_type.size() <= 20
+        && data.txn_type in ['opening', 'invoice', 'payment', 'adjustment']
+        && isValidLedgerAmount(data.debit)
+        && isValidLedgerAmount(data.credit)
+        && ((data.debit > 0 && data.credit == 0) || (data.credit > 0 && data.debit == 0))
+        && (data.txn_type != 'opening' || (data.debit > 0 && data.credit == 0))
+        && (data.txn_type != 'invoice' || (data.debit > 0 && data.credit == 0))
+        && (data.txn_type != 'payment' || (data.credit > 0 && data.debit == 0))
+        && data.note is string
+        && data.note.size() <= 300
+        && data.reference is string
+        && data.reference.size() <= 80
+        && data.createdAt is timestamp;
+    }
+
+    // Validation Blueprint: Order entity
+    function isValidOrder(data) {
+      return data.keys().hasAll([
+          'ownerId',
+          'clientId',
+          'orderDate',
+          'fabricType',
+          'greyFabricThan',
+          'greyFabricGaj',
+          'rate',
+          'status',
+          'finalGaj',
+          'finalBillAmount',
+          'deliveredAt',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId',
+          'clientId',
+          'orderDate',
+          'fabricType',
+          'greyFabricThan',
+          'greyFabricGaj',
+          'rate',
+          'status',
+          'finalGaj',
+          'finalBillAmount',
+          'deliveredAt',
+          'createdAt',
+          'updatedAt'
+        ])
+        && isValidId(data.ownerId)
+        && data.ownerId == request.auth.uid
+        && isValidId(data.clientId)
+        && data.orderDate is string
+        && data.orderDate.size() == 10
+        && data.orderDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && data.fabricType is string
+        && data.fabricType.size() >= 1
+        && data.fabricType.size() <= 40
+        && data.fabricType in ['মার্কিন', 'লংক্লথ', 'ভয়েল', 'পপলিন', 'ইউনিটিকা', 'আস্তর']
+        && isPositiveBoundedNumber(data.greyFabricThan, 1000000)
+        && isPositiveBoundedNumber(data.greyFabricGaj, 10000000)
+        && isPositiveBoundedNumber(data.rate, 1000000)
+        && data.status is string
+        && data.status.size() >= 1
+        && data.status.size() <= 30
+        && data.status in ['Processing', 'Dyeing', 'Washing', 'Finishing', 'Delivered']
+        && (
+          (
+            data.status != 'Delivered'
+            && data.finalGaj == null
+            && data.finalBillAmount == null
+            && data.deliveredAt == null
+          ) || (
+            data.status == 'Delivered'
+            && isPositiveBoundedNumber(data.finalGaj, 10000000)
+            && isPositiveBoundedNumber(data.finalBillAmount, 1000000000)
+            && data.deliveredAt is timestamp
+          )
+        )
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    // Validation Blueprint: MoneyInRecord entity
+    function isValidMoneyIn(data) {
+      return data.keys().hasAll([
+          'ownerId',
+          'clientId',
+          'ledgerEntryId',
+          'reference',
+          'amount',
+          'paymentDate',
+          'paymentMethod',
+          'note',
+          'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId',
+          'clientId',
+          'ledgerEntryId',
+          'reference',
+          'amount',
+          'paymentDate',
+          'paymentMethod',
+          'note',
+          'createdAt'
+        ])
+        && isValidId(data.ownerId)
+        && data.ownerId == request.auth.uid
+        && isValidId(data.clientId)
+        && isValidId(data.ledgerEntryId)
+        && data.reference is string
+        && data.reference.size() >= 5
+        && data.reference.size() <= 80
+        && data.reference.matches('^PAY-[a-zA-Z0-9_\\-]+$')
+        && isPositiveBoundedNumber(data.amount, 1000000000)
+        && data.paymentDate is string
+        && data.paymentDate.size() == 10
+        && data.paymentDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && data.paymentMethod is string
+        && data.paymentMethod.size() >= 1
+        && data.paymentMethod.size() <= 30
+        && data.paymentMethod in ['Cash', 'Bank', 'Mobile Banking']
+        && data.note is string
+        && data.note.size() <= 300
+        && data.createdAt is timestamp;
+    }
+
+    // Validation Blueprint: Supplier entity (strictly excludes stored balance/payable fields)
+    function isValidSupplier(data) {
+      return data.keys().hasAll([
+          'ownerId',
+          'supplierName',
+          'companyName',
+          'mobile',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId',
+          'supplierName',
+          'companyName',
+          'mobile',
+          'createdAt',
+          'updatedAt'
+        ])
+        && isValidId(data.ownerId)
+        && data.ownerId == request.auth.uid
+        && data.supplierName is string
+        && data.supplierName.size() >= 1
+        && data.supplierName.size() <= 120
+        && data.companyName is string
+        && data.companyName.size() >= 1
+        && data.companyName.size() <= 160
+        && data.mobile is string
+        && data.mobile.size() >= 5
+        && data.mobile.size() <= 25
+        && data.mobile.matches('^[+0-9 ()-]+$')
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    // Validation Blueprint: SupplierLedgerEntry entity (Inverted payable logic: Credit = we owe, Debit = we paid)
+    function isValidSupplierLedgerEntry(data) {
+      return data.keys().hasAll([
+          'ownerId',
+          'supplierId',
+          'txn_type',
+          'debit',
+          'credit',
+          'reference',
+          'note',
+          'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId',
+          'supplierId',
+          'txn_type',
+          'debit',
+          'credit',
+          'reference',
+          'note',
+          'createdAt'
+        ])
+        && isValidId(data.ownerId)
+        && data.ownerId == request.auth.uid
+        && isValidId(data.supplierId)
+        && data.txn_type is string
+        && data.txn_type.size() >= 1
+        && data.txn_type.size() <= 20
+        && data.txn_type in ['opening', 'purchase', 'payment', 'adjustment']
+        && isValidLedgerAmount(data.debit)
+        && isValidLedgerAmount(data.credit)
+        && ((data.debit > 0 && data.credit == 0) || (data.credit > 0 && data.debit == 0))
+        && (data.txn_type != 'opening' || (data.credit > 0 && data.debit == 0))
+        && (data.txn_type != 'purchase' || (data.credit > 0 && data.debit == 0))
+        && (data.txn_type != 'payment' || (data.debit > 0 && data.credit == 0))
+        && data.reference is string
+        && data.reference.size() <= 80
+        && data.note is string
+        && data.note.size() <= 300
+        && data.createdAt is timestamp;
+    }
+
+    // Validation Blueprint: Purchase entity
+    function isValidPurchase(data) {
+      return data.keys().hasAll([
+          'ownerId',
+          'supplierId',
+          'ledgerEntryId',
+          'reference',
+          'purchaseDate',
+          'itemName',
+          'quantity',
+          'unit',
+          'rate',
+          'totalAmount',
+          'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId',
+          'supplierId',
+          'ledgerEntryId',
+          'reference',
+          'purchaseDate',
+          'itemName',
+          'quantity',
+          'unit',
+          'rate',
+          'totalAmount',
+          'createdAt'
+        ])
+        && isValidId(data.ownerId)
+        && data.ownerId == request.auth.uid
+        && isValidId(data.supplierId)
+        && isValidId(data.ledgerEntryId)
+        && data.reference is string
+        && data.reference.size() >= 5
+        && data.reference.size() <= 80
+        && data.reference.matches('^PUR-[a-zA-Z0-9_\\-]+$')
+        && data.purchaseDate is string
+        && data.purchaseDate.size() == 10
+        && data.purchaseDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && data.itemName is string
+        && data.itemName.size() >= 1
+        && data.itemName.size() <= 160
+        && isPositiveBoundedNumber(data.quantity, 10000000)
+        && data.unit is string
+        && data.unit.size() >= 1
+        && data.unit.size() <= 20
+        && data.unit in ['KG', 'Liter', 'Pcs']
+        && isPositiveBoundedNumber(data.rate, 10000000)
+        && isPositiveBoundedNumber(data.totalAmount, 1000000000)
+        && math.abs(data.totalAmount - (data.quantity * data.rate)) <= 0.02
+        && data.createdAt is timestamp;
+    }
+
+    // Validation Blueprint: MoneyOutRecord entity
+    function isValidMoneyOut(data) {
+      return data.keys().hasAll([
+          'ownerId',
+          'supplierId',
+          'ledgerEntryId',
+          'reference',
+          'amount',
+          'paymentDate',
+          'paymentMethod',
+          'note',
+          'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId',
+          'supplierId',
+          'ledgerEntryId',
+          'reference',
+          'amount',
+          'paymentDate',
+          'paymentMethod',
+          'note',
+          'createdAt'
+        ])
+        && isValidId(data.ownerId)
+        && data.ownerId == request.auth.uid
+        && isValidId(data.supplierId)
+        && isValidId(data.ledgerEntryId)
+        && data.reference is string
+        && data.reference.size() >= 6
+        && data.reference.size() <= 80
+        && data.reference.matches('^SPAY-[a-zA-Z0-9_\\-]+$')
+        && isPositiveBoundedNumber(data.amount, 1000000000)
+        && data.paymentDate is string
+        && data.paymentDate.size() == 10
+        && data.paymentDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && data.paymentMethod is string
+        && data.paymentMethod.size() >= 1
+        && data.paymentMethod.size() <= 20
+        && data.paymentMethod in ['Cash', 'Bank']
+        && data.note is string
+        && data.note.size() <= 300
+        && data.createdAt is timestamp;
+    }
+
+    // Collection: /clients/{clientId}
+    match /clients/{clientId} {
+      allow get: if isVerifiedUser()
+        && isValidId(clientId)
+        && isOwner(existing().ownerId);
+
+      allow list: if isVerifiedUser()
+        && existing().ownerId == request.auth.uid;
+
+      allow create: if isVerifiedUser()
+        && isValidId(clientId)
+        && isValidClient(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isVerifiedUser()
+        && isValidId(clientId)
+        && isValidClient(incoming())
+        && isOwner(existing().ownerId)
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'clientName',
+          'companyName',
+          'mobile',
+          'address',
+          'updatedAt'
+        ]);
+
+      allow delete: if false;
+    }
+
+    // Collection: /client_ledger/{entryId} (Append-Only Client Transaction Log)
+    match /client_ledger/{entryId} {
+      allow get: if isVerifiedUser()
+        && isValidId(entryId)
+        && isOwner(existing().ownerId);
+
+      allow list: if isVerifiedUser()
+        && existing().ownerId == request.auth.uid;
+
+      allow create: if isVerifiedUser()
+        && isValidId(entryId)
+        && isValidLedgerEntry(incoming())
+        && incoming().createdAt == request.time
+        && existsAfter(/databases/$(database)/documents/clients/$(incoming().clientId))
+        && getAfter(/databases/$(database)/documents/clients/$(incoming().clientId)).data.ownerId == request.auth.uid;
+
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    // Collection: /orders/{orderId}
+    match /orders/{orderId} {
+      allow get: if isVerifiedUser()
+        && isValidId(orderId)
+        && isOwner(existing().ownerId);
+
+      allow list: if isVerifiedUser()
+        && existing().ownerId == request.auth.uid;
+
+      allow create: if isVerifiedUser()
+        && isValidId(orderId)
+        && isValidOrder(incoming())
+        && incoming().status != 'Delivered'
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && exists(/databases/$(database)/documents/clients/$(incoming().clientId))
+        && get(/databases/$(database)/documents/clients/$(incoming().clientId)).data.ownerId == request.auth.uid;
+
+      allow update: if isVerifiedUser()
+        && isValidId(orderId)
+        && isValidOrder(incoming())
+        && isOwner(existing().ownerId)
+        && existing().status != 'Delivered'
+        && incoming().ownerId == existing().ownerId
+        && incoming().clientId == existing().clientId
+        && incoming().orderDate == existing().orderDate
+        && incoming().fabricType == existing().fabricType
+        && incoming().greyFabricThan == existing().greyFabricThan
+        && incoming().greyFabricGaj == existing().greyFabricGaj
+        && incoming().rate == existing().rate
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          (
+            incoming().status != 'Delivered'
+            && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt'])
+          ) || (
+            incoming().status == 'Delivered'
+            && incoming().deliveredAt == request.time
+            && math.abs(incoming().finalBillAmount - (incoming().finalGaj * existing().rate)) <= 0.02
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'status',
+              'finalGaj',
+              'finalBillAmount',
+              'deliveredAt',
+              'updatedAt'
+            ])
+            && existsAfter(/databases/$(database)/documents/client_ledger/$('INV_' + orderId))
+            && getAfter(/databases/$(database)/documents/client_ledger/$('INV_' + orderId)).data.ownerId == request.auth.uid
+            && getAfter(/databases/$(database)/documents/client_ledger/$('INV_' + orderId)).data.clientId == existing().clientId
+            && getAfter(/databases/$(database)/documents/client_ledger/$('INV_' + orderId)).data.txn_type == 'invoice'
+            && getAfter(/databases/$(database)/documents/client_ledger/$('INV_' + orderId)).data.debit == incoming().finalBillAmount
+            && getAfter(/databases/$(database)/documents/client_ledger/$('INV_' + orderId)).data.credit == 0
+            && getAfter(/databases/$(database)/documents/client_ledger/$('INV_' + orderId)).data.reference == orderId
+          )
+        );
+
+      allow delete: if false;
+    }
+
+    // Collection: /money_in/{paymentId} (Append-Only Client Payment Inflow)
+    match /money_in/{paymentId} {
+      allow get: if isVerifiedUser()
+        && isValidId(paymentId)
+        && isOwner(existing().ownerId);
+
+      allow list: if isVerifiedUser()
+        && existing().ownerId == request.auth.uid;
+
+      allow create: if isVerifiedUser()
+        && isValidId(paymentId)
+        && isValidMoneyIn(incoming())
+        && incoming().ledgerEntryId == paymentId
+        && incoming().reference == paymentId
+        && incoming().createdAt == request.time
+        && exists(/databases/$(database)/documents/clients/$(incoming().clientId))
+        && get(/databases/$(database)/documents/clients/$(incoming().clientId)).data.ownerId == request.auth.uid
+        && existsAfter(/databases/$(database)/documents/client_ledger/$(paymentId))
+        && getAfter(/databases/$(database)/documents/client_ledger/$(paymentId)).data.ownerId == request.auth.uid
+        && getAfter(/databases/$(database)/documents/client_ledger/$(paymentId)).data.clientId == incoming().clientId
+        && getAfter(/databases/$(database)/documents/client_ledger/$(paymentId)).data.txn_type == 'payment'
+        && getAfter(/databases/$(database)/documents/client_ledger/$(paymentId)).data.debit == 0
+        && getAfter(/databases/$(database)/documents/client_ledger/$(paymentId)).data.credit == incoming().amount
+        && getAfter(/databases/$(database)/documents/client_ledger/$(paymentId)).data.reference == paymentId;
+
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    // Collection: /suppliers/{supplierId}
+    match /suppliers/{supplierId} {
+      allow get: if isVerifiedUser()
+        && isValidId(supplierId)
+        && isOwner(existing().ownerId);
+
+      allow list: if isVerifiedUser()
+        && existing().ownerId == request.auth.uid;
+
+      allow create: if isVerifiedUser()
+        && isValidId(supplierId)
+        && isValidSupplier(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isVerifiedUser()
+        && isValidId(supplierId)
+        && isValidSupplier(incoming())
+        && isOwner(existing().ownerId)
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'supplierName',
+          'companyName',
+          'mobile',
+          'updatedAt'
+        ]);
+
+      allow delete: if false;
+    }
+
+    // Collection: /supplier_ledger/{entryId} (Append-Only Supplier Payable Log)
+    match /supplier_ledger/{entryId} {
+      allow get: if isVerifiedUser()
+        && isValidId(entryId)
+        && isOwner(existing().ownerId);
+
+      allow list: if isVerifiedUser()
+        && existing().ownerId == request.auth.uid;
+
+      // Supports atomic onboarding (supplier + opening payable) as well as purchases & payments
+      allow create: if isVerifiedUser()
+        && isValidId(entryId)
+        && isValidSupplierLedgerEntry(incoming())
+        && incoming().createdAt == request.time
+        && existsAfter(/databases/$(database)/documents/suppliers/$(incoming().supplierId))
+        && getAfter(/databases/$(database)/documents/suppliers/$(incoming().supplierId)).data.ownerId == request.auth.uid;
+
+      // Append-only payable ledger: immutable once recorded
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    // Collection: /purchases/{purchaseId} (Append-Only Inventory Purchases Paired Atomically with supplier_ledger)
+    match /purchases/{purchaseId} {
+      allow get: if isVerifiedUser()
+        && isValidId(purchaseId)
+        && isOwner(existing().ownerId);
+
+      allow list: if isVerifiedUser()
+        && existing().ownerId == request.auth.uid;
+
+      // Create: Must atomically post credit to supplier_ledger with txn_type == 'purchase' and matching amount
+      allow create: if isVerifiedUser()
+        && isValidId(purchaseId)
+        && isValidPurchase(incoming())
+        && incoming().ledgerEntryId == purchaseId
+        && incoming().reference == purchaseId
+        && incoming().createdAt == request.time
+        && exists(/databases/$(database)/documents/suppliers/$(incoming().supplierId))
+        && get(/databases/$(database)/documents/suppliers/$(incoming().supplierId)).data.ownerId == request.auth.uid
+        && existsAfter(/databases/$(database)/documents/supplier_ledger/$(purchaseId))
+        && getAfter(/databases/$(database)/documents/supplier_ledger/$(purchaseId)).data.ownerId == request.auth.uid
+        && getAfter(/databases/$(database)/documents/supplier_ledger/$(purchaseId)).data.supplierId == incoming().supplierId
+        && getAfter(/databases/$(database)/documents/supplier_ledger/$(purchaseId)).data.txn_type == 'purchase'
+        && getAfter(/databases/$(database)/documents/supplier_ledger/$(purchaseId)).data.credit == incoming().totalAmount
+        && getAfter(/databases/$(database)/documents/supplier_ledger/$(purchaseId)).data.debit == 0
+        && getAfter(/databases/$(database)/documents/supplier_ledger/$(purchaseId)).data.reference == purchaseId;
+
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    // Collection: /money_out/{paymentId} (Append-Only Supplier Payment Outflow Paired Atomically with supplier_ledger)
+    match /money_out/{paymentId} {
+      allow get: if isVerifiedUser()
+        && isValidId(paymentId)
+        && isOwner(existing().ownerId);
+
+      allow list: if isVerifiedUser()
+        && existing().ownerId == request.auth.uid;
+
+      // Create: Must atomically post debit to supplier_ledger with txn_type == 'payment' and matching amount
+      allow create: if isVerifiedUser()
+        && isValidId(paymentId)
+        && isValidMoneyOut(incoming())
+        && incoming().ledgerEntryId == paymentId
+        && incoming().reference == paymentId
+        && incoming().createdAt == request.time
+        && exists(/databases/$(database)/documents/suppliers/$(incoming().supplierId))
+        && get(/databases/$(database)/documents/suppliers/$(incoming().supplierId)).data.ownerId == request.auth.uid
+        && existsAfter(/databases/$(database)/documents/supplier_ledger/$(paymentId))
+        && getAfter(/databases/$(database)/documents/supplier_ledger/$(paymentId)).data.ownerId == request.auth.uid
+        && getAfter(/databases/$(database)/documents/supplier_ledger/$(paymentId)).data.supplierId == incoming().supplierId
+        && getAfter(/databases/$(database)/documents/supplier_ledger/$(paymentId)).data.txn_type == 'payment'
+        && getAfter(/databases/$(database)/documents/supplier_ledger/$(paymentId)).data.debit == incoming().amount
+        && getAfter(/databases/$(database)/documents/supplier_ledger/$(paymentId)).data.credit == 0
+        && getAfter(/databases/$(database)/documents/supplier_ledger/$(paymentId)).data.reference == paymentId;
+
+      // Append-only cash/bank outflow audit log
+      allow update: if false;
+      allow delete: if false;
+    }
+  }
+}

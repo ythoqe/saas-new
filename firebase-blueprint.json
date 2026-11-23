@@ -1,0 +1,515 @@
+{
+  "entities": {
+    "Client": {
+      "title": "Client",
+      "description": "A dyeing and washing mill buyer or garment factory client. Financial dues are never stored on this document and are always calculated dynamically from client_ledger.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "clientName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "companyName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "mobile": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 25,
+          "pattern": "^[+0-9 ()-]+$"
+        },
+        "address": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "ownerId",
+        "clientName",
+        "companyName",
+        "mobile",
+        "address",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "ClientLedgerEntry": {
+      "title": "ClientLedgerEntry",
+      "description": "An immutable append-only accounting ledger transaction for a client. Current Due = (Sum of Debit) - (Sum of Credit).",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "clientId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "txn_type": {
+          "type": "string",
+          "enum": ["opening", "invoice", "payment", "adjustment"]
+        },
+        "debit": {
+          "type": "number"
+        },
+        "credit": {
+          "type": "number"
+        },
+        "note": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 300
+        },
+        "reference": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 80
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "ownerId",
+        "clientId",
+        "txn_type",
+        "debit",
+        "credit",
+        "note",
+        "reference",
+        "createdAt"
+      ]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "A dyeing and washing mill production order linked to a client with atomic delivery billing.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "clientId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "orderDate": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 10,
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "fabricType": {
+          "type": "string",
+          "enum": ["মার্কিন", "লংক্লথ", "ভয়েল", "পপলিন", "ইউনিটিকা", "আস্তর"]
+        },
+        "greyFabricThan": {
+          "type": "number"
+        },
+        "greyFabricGaj": {
+          "type": "number"
+        },
+        "rate": {
+          "type": "number"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["Processing", "Dyeing", "Washing", "Finishing", "Delivered"]
+        },
+        "finalGaj": {
+          "type": "number"
+        },
+        "finalBillAmount": {
+          "type": "number"
+        },
+        "deliveredAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "ownerId",
+        "clientId",
+        "orderDate",
+        "fabricType",
+        "greyFabricThan",
+        "greyFabricGaj",
+        "rate",
+        "status",
+        "finalGaj",
+        "finalBillAmount",
+        "deliveredAt",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "MoneyInRecord": {
+      "title": "MoneyInRecord",
+      "description": "An immutable cash/bank/mobile-banking inflow record created atomically alongside a client_ledger payment credit entry.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "clientId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ledgerEntryId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "reference": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 80,
+          "pattern": "^PAY-[a-zA-Z0-9_\\-]+$"
+        },
+        "amount": {
+          "type": "number"
+        },
+        "paymentDate": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 10,
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "paymentMethod": {
+          "type": "string",
+          "enum": ["Cash", "Bank", "Mobile Banking"]
+        },
+        "note": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 300
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "ownerId",
+        "clientId",
+        "ledgerEntryId",
+        "reference",
+        "amount",
+        "paymentDate",
+        "paymentMethod",
+        "note",
+        "createdAt"
+      ]
+    },
+    "Supplier": {
+      "title": "Supplier",
+      "description": "A chemical, dye, fuel, or spare parts vendor for the mill. Payables are never stored on this document and are always calculated dynamically from supplier_ledger.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "supplierName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "companyName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "mobile": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 25,
+          "pattern": "^[+0-9 ()-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "ownerId",
+        "supplierName",
+        "companyName",
+        "mobile",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "SupplierLedgerEntry": {
+      "title": "SupplierLedgerEntry",
+      "description": "An immutable append-only payable ledger log for a supplier. Credit increases payable (purchase/opening); Debit decreases payable (payment). Total Payable = (Sum of Credit) - (Sum of Debit).",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "supplierId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "txn_type": {
+          "type": "string",
+          "enum": ["opening", "purchase", "payment", "adjustment"]
+        },
+        "debit": {
+          "type": "number"
+        },
+        "credit": {
+          "type": "number"
+        },
+        "reference": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 80
+        },
+        "note": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 300
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "ownerId",
+        "supplierId",
+        "txn_type",
+        "debit",
+        "credit",
+        "reference",
+        "note",
+        "createdAt"
+      ]
+    },
+    "Purchase": {
+      "title": "Purchase",
+      "description": "An immutable supplier purchase record (chemicals, jute, bleaching, spare parts) atomically linked to a supplier_ledger credit entry.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "supplierId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ledgerEntryId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "reference": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 80,
+          "pattern": "^PUR-[a-zA-Z0-9_\\-]+$"
+        },
+        "purchaseDate": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 10,
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "itemName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "quantity": {
+          "type": "number"
+        },
+        "unit": {
+          "type": "string",
+          "enum": ["KG", "Liter", "Pcs"]
+        },
+        "rate": {
+          "type": "number"
+        },
+        "totalAmount": {
+          "type": "number"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "ownerId",
+        "supplierId",
+        "ledgerEntryId",
+        "reference",
+        "purchaseDate",
+        "itemName",
+        "quantity",
+        "unit",
+        "rate",
+        "totalAmount",
+        "createdAt"
+      ]
+    },
+    "MoneyOutRecord": {
+      "title": "MoneyOutRecord",
+      "description": "An immutable cash/bank outflow record created atomically alongside a supplier_ledger payment debit entry.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "supplierId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ledgerEntryId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "reference": {
+          "type": "string",
+          "minLength": 6,
+          "maxLength": 80,
+          "pattern": "^SPAY-[a-zA-Z0-9_\\-]+$"
+        },
+        "amount": {
+          "type": "number"
+        },
+        "paymentDate": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 10,
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "paymentMethod": {
+          "type": "string",
+          "enum": ["Cash", "Bank"]
+        },
+        "note": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 300
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "ownerId",
+        "supplierId",
+        "ledgerEntryId",
+        "reference",
+        "amount",
+        "paymentDate",
+        "paymentMethod",
+        "note",
+        "createdAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/clients/{clientId}": {
+      "schema": { "$ref": "#/entities/Client" },
+      "description": "Stores mill client contact profiles owned by authenticated operators. Does not store a balance field."
+    },
+    "/client_ledger/{entryId}": {
+      "schema": { "$ref": "#/entities/ClientLedgerEntry" },
+      "description": "Append-only ledger of debit and credit transactions per client used to dynamically calculate Current Due."
+    },
+    "/orders/{orderId}": {
+      "schema": { "$ref": "#/entities/Order" },
+      "description": "Mill dyeing and washing orders tracking grey fabric intake, processing stage, final delivered gaj, and atomic invoice billing."
+    },
+    "/money_in/{paymentId}": {
+      "schema": { "$ref": "#/entities/MoneyInRecord" },
+      "description": "Append-only cash, bank, and mobile banking payment receipt records paired atomically with client_ledger payment credits."
+    },
+    "/suppliers/{supplierId}": {
+      "schema": { "$ref": "#/entities/Supplier" },
+      "description": "Stores mill vendor/supplier profiles owned by authenticated operators. Does not store a payable balance field."
+    },
+    "/supplier_ledger/{entryId}": {
+      "schema": { "$ref": "#/entities/SupplierLedgerEntry" },
+      "description": "Append-only payable ledger per supplier. Total Payable = (Sum of Credit) - (Sum of Debit)."
+    },
+    "/purchases/{purchaseId}": {
+      "schema": { "$ref": "#/entities/Purchase" },
+      "description": "Append-only inventory purchase records atomically paired with supplier_ledger credit entries."
+    },
+    "/money_out/{paymentId}": {
+      "schema": { "$ref": "#/entities/MoneyOutRecord" },
+      "description": "Append-only supplier cash/bank payment outflows atomically paired with supplier_ledger debit entries."
+    }
+  }
+}

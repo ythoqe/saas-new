@@ -1,0 +1,6 @@
+{
+  "name": "IndigoMill Ledger",
+  "description": "Dyeing and Washing Mill management dashboard with Client Management and dynamic Firestore double-entry client_ledger due calculation.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
