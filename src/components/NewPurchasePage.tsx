@@ -1,11 +1,20 @@
 import React, { useMemo, useState } from 'react';
-import { collection, doc, serverTimestamp, writeBatch } from 'firebase/firestore';
-import { ArrowLeft, Plus } from 'lucide-react';
+import {
+  collection,
+  doc,
+  runTransaction,
+  serverTimestamp,
+  writeBatch,
+} from 'firebase/firestore';
+import { ArrowLeft, Boxes, CheckCircle2, Plus } from 'lucide-react';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import {
+  INVENTORY_ITEM_PRESETS,
+  INVENTORY_VALIDATION,
   LEDGER_VALIDATION,
   PURCHASE_UNITS,
   PURCHASE_VALIDATION,
+  type InventoryItem,
   type PurchaseUnit,
   type SupplierRecord,
 } from '../types/mill';
@@ -16,33 +25,37 @@ import {
   roundCurrency,
 } from '../utils/ledger';
 
-const COMMON_MILL_ITEMS = [
-  'Jute',
-  'Bleaching',
-  'Caustic Soda',
-  'Hydrogen Peroxide',
-  'Reactive Dye',
-  'Acetic Acid',
-  'Spare Parts',
-] as const;
+const COMMON_MILL_ITEMS = INVENTORY_ITEM_PRESETS.filter((p) => p !== 'Other');
+
+export interface PurchaseStockSummary {
+  itemName: string;
+  addedQty: number;
+  unit: PurchaseUnit;
+  newStock: number;
+}
 
 interface NewPurchasePageProps {
   ownerId: string;
   suppliers: SupplierRecord[];
+  inventoryItems: InventoryItem[];
   onCancel: () => void;
   onAddSupplier: () => void;
+  onOpenInventory: () => void;
   onPurchaseCreated: (
     purchaseRef: string,
     supplierName: string,
-    totalAmount: number
+    totalAmount: number,
+    stockSummary?: PurchaseStockSummary
   ) => void;
 }
 
 export function NewPurchasePage({
   ownerId,
   suppliers,
+  inventoryItems,
   onCancel,
   onAddSupplier,
+  onOpenInventory,
   onPurchaseCreated,
 }: NewPurchasePageProps) {
   const sortedSuppliers = useMemo(
@@ -53,8 +66,17 @@ export function NewPurchasePage({
     [suppliers]
   );
 
+  const sortedInventory = useMemo(
+    () =>
+      [...inventoryItems].sort((a, b) =>
+        a.itemName.localeCompare(b.itemName)
+      ),
+    [inventoryItems]
+  );
+
   const [supplierId, setSupplierId] = useState('');
   const [purchaseDate, setPurchaseDate] = useState(() => getTodayIsoDate());
+  const [selectedInventoryId, setSelectedInventoryId] = useState<string>('');
   const [itemName, setItemName] = useState('');
   const [quantity, setQuantity] = useState('');
   const [unit, setUnit] = useState<PurchaseUnit>('KG');
@@ -67,6 +89,28 @@ export function NewPurchasePage({
     [sortedSuppliers, supplierId]
   );
 
+  const explicitInventoryItem = useMemo(
+    () =>
+      selectedInventoryId && selectedInventoryId !== 'custom'
+        ? sortedInventory.find((i) => i.id === selectedInventoryId) ?? null
+        : null,
+    [sortedInventory, selectedInventoryId]
+  );
+
+  // Also auto-match if user typed an exact existing inventory item name with matching unit
+  const autoMatchedInventoryItem = useMemo(() => {
+    if (explicitInventoryItem) return explicitInventoryItem;
+    const trimmed = itemName.trim().toLowerCase();
+    if (!trimmed) return null;
+    return (
+      sortedInventory.find(
+        (i) => i.itemName.trim().toLowerCase() === trimmed && i.unit === unit
+      ) ?? null
+    );
+  }, [explicitInventoryItem, itemName, unit, sortedInventory]);
+
+  const linkedInventoryItem = explicitInventoryItem ?? autoMatchedInventoryItem;
+
   const parsedQty = Number(quantity);
   const parsedRate = Number(rate);
 
@@ -77,6 +121,24 @@ export function NewPurchasePage({
     parsedRate > 0
       ? roundCurrency(parsedQty * parsedRate)
       : null;
+
+  const projectedNewStock =
+    linkedInventoryItem && Number.isFinite(parsedQty) && parsedQty > 0
+      ? roundCurrency(linkedInventoryItem.currentStock + parsedQty)
+      : null;
+
+  const handleInventorySelectChange = (value: string) => {
+    setSelectedInventoryId(value);
+    if (value && value !== 'custom') {
+      const found = sortedInventory.find((i) => i.id === value);
+      if (found) {
+        setItemName(found.itemName);
+        setUnit(found.unit);
+      }
+    } else if (value === 'custom') {
+      setItemName('');
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -92,7 +154,9 @@ export function NewPurchasePage({
       return;
     }
 
-    const trimmedItem = itemName.trim();
+    const trimmedItem = (linkedInventoryItem?.itemName ?? itemName).trim();
+    const resolvedUnit = linkedInventoryItem?.unit ?? unit;
+
     if (
       trimmedItem.length < PURCHASE_VALIDATION.itemNameMin ||
       trimmedItem.length > PURCHASE_VALIDATION.itemNameMax
@@ -114,7 +178,7 @@ export function NewPurchasePage({
       return;
     }
 
-    if (!PURCHASE_UNITS.includes(unit)) {
+    if (!PURCHASE_UNITS.includes(resolvedUnit)) {
       setFormError('Please select a valid Unit (KG, Liter, or Pcs).');
       return;
     }
@@ -145,19 +209,17 @@ export function NewPurchasePage({
       .slice(0, 8)
       .toUpperCase();
     const purchaseRefId = `PUR-${rawAutoId}`;
-    const ledgerNote = `${trimmedItem} — ${formatNumber(cleanQty)} ${unit} @ ${formatCurrency(cleanRate)}/${unit} (${purchaseDate})`.slice(
+    const ledgerNote = `${trimmedItem} — ${formatNumber(cleanQty)} ${resolvedUnit} @ ${formatCurrency(cleanRate)}/${resolvedUnit} (${purchaseDate})`.slice(
       0,
       LEDGER_VALIDATION.noteMax
     );
 
     setIsSubmitting(true);
     try {
-      const batch = writeBatch(db);
       const purchaseDocRef = doc(db, 'purchases', purchaseRefId);
       const supplierLedgerRef = doc(db, 'supplier_ledger', purchaseRefId);
 
-      // 1. Save immutable purchase record
-      batch.set(purchaseDocRef, {
+      const purchasePayload = {
         ownerId,
         supplierId,
         ledgerEntryId: purchaseRefId,
@@ -165,14 +227,13 @@ export function NewPurchasePage({
         purchaseDate,
         itemName: trimmedItem,
         quantity: cleanQty,
-        unit,
+        unit: resolvedUnit,
         rate: cleanRate,
         totalAmount: cleanTotal,
         createdAt: serverTimestamp(),
-      });
+      };
 
-      // 2. Atomically insert credit into supplier_ledger (increases our payable)
-      batch.set(supplierLedgerRef, {
+      const supplierLedgerPayload = {
         ownerId,
         supplierId,
         txn_type: 'purchase',
@@ -181,22 +242,113 @@ export function NewPurchasePage({
         reference: purchaseRefId,
         note: ledgerNote,
         createdAt: serverTimestamp(),
-      });
+      };
 
-      try {
-        await batch.commit();
-      } catch (error) {
-        handleFirestoreError(
-          error,
-          OperationType.WRITE,
-          `purchases/${purchaseRefId}`
+      let stockSummary: PurchaseStockSummary | undefined;
+
+      if (linkedInventoryItem) {
+        const inventoryDocRef = doc(db, 'inventory', linkedInventoryItem.id);
+        const movementDocRef = doc(
+          db,
+          'stock_movements',
+          `STK-${purchaseRefId}`
         );
+        const movementNote = `Purchased from ${selectedSupplier.supplierName} (${purchaseRefId})`.slice(
+          0,
+          INVENTORY_VALIDATION.noteMax
+        );
+
+        try {
+          await runTransaction(db, async (tx) => {
+            // Firestore transactions require all reads before writes
+            const invSnap = await tx.get(inventoryDocRef);
+            if (!invSnap.exists()) {
+              throw new Error(
+                'Selected inventory item no longer exists. Please refresh or choose another item.'
+              );
+            }
+
+            const latestStock = roundCurrency(
+              Number(invSnap.data().currentStock ?? 0)
+            );
+            const nextStock = roundCurrency(latestStock + cleanQty);
+
+            if (nextStock > INVENTORY_VALIDATION.maxStock) {
+              throw new Error(
+                `Adding ${formatNumber(cleanQty)} ${resolvedUnit} exceeds maximum stock limit (${INVENTORY_VALIDATION.maxStock.toLocaleString()}).`
+              );
+            }
+
+            // 1. Save purchase record
+            tx.set(purchaseDocRef, purchasePayload);
+
+            // 2. Credit supplier_ledger (increases payable)
+            tx.set(supplierLedgerRef, supplierLedgerPayload);
+
+            // 3. Automatically increase Current Stock in inventory
+            tx.update(inventoryDocRef, {
+              currentStock: nextStock,
+              updatedAt: serverTimestamp(),
+            });
+
+            // 4. Record immutable purchase stock-in movement
+            tx.set(movementDocRef, {
+              ownerId,
+              inventoryItemId: linkedInventoryItem.id,
+              itemName: linkedInventoryItem.itemName,
+              unit: linkedInventoryItem.unit,
+              type: 'purchase',
+              quantity: cleanQty,
+              previousStock: latestStock,
+              resultingStock: nextStock,
+              movementDate: purchaseDate,
+              reference: purchaseRefId,
+              note: movementNote,
+              createdAt: serverTimestamp(),
+            });
+
+            stockSummary = {
+              itemName: linkedInventoryItem.itemName,
+              addedQty: cleanQty,
+              unit: linkedInventoryItem.unit,
+              newStock: nextStock,
+            };
+          });
+        } catch (error) {
+          if (
+            error instanceof Error &&
+            (error.message.startsWith('Selected inventory item') ||
+              error.message.startsWith('Adding '))
+          ) {
+            throw error;
+          }
+          handleFirestoreError(
+            error,
+            OperationType.WRITE,
+            `purchases/${purchaseRefId}`
+          );
+        }
+      } else {
+        const batch = writeBatch(db);
+        batch.set(purchaseDocRef, purchasePayload);
+        batch.set(supplierLedgerRef, supplierLedgerPayload);
+
+        try {
+          await batch.commit();
+        } catch (error) {
+          handleFirestoreError(
+            error,
+            OperationType.WRITE,
+            `purchases/${purchaseRefId}`
+          );
+        }
       }
 
       onPurchaseCreated(
         purchaseRefId,
         selectedSupplier.supplierName,
-        cleanTotal
+        cleanTotal,
+        stockSummary
       );
     } catch (error) {
       setFormError(
@@ -231,9 +383,11 @@ export function NewPurchasePage({
               Purchase Entry Details
             </h2>
             <p className="text-xs text-slate-500 mt-0.5">
-              Saving a purchase atomically posts a credit entry to{' '}
-              <span className="font-mono text-slate-700">supplier_ledger</span>,
-              increasing your payable balance to the vendor.
+              Saving a purchase credits{' '}
+              <span className="font-mono text-slate-700">supplier_ledger</span>{' '}
+              and automatically increases stock in{' '}
+              <span className="font-mono text-slate-700">inventory</span> when
+              linked to a tracked item.
             </p>
           </div>
 
@@ -290,10 +444,60 @@ export function NewPurchasePage({
                   <option value="">Select a registered supplier...</option>
                   {sortedSuppliers.map((supplier) => (
                     <option key={supplier.id} value={supplier.id}>
-                      {supplier.supplierName} — {supplier.companyName} ({supplier.mobile})
+                      {supplier.supplierName} — {supplier.companyName} (
+                      {supplier.mobile})
                     </option>
                   ))}
                 </select>
+              )}
+            </div>
+
+            {/* Inventory Item Link Selector */}
+            <div>
+              <div className="flex items-center justify-between gap-2 mb-1.5">
+                <label
+                  htmlFor="purchaseInventorySelect"
+                  className="block text-sm font-medium text-slate-700"
+                >
+                  Inventory Item (Auto-Restock)
+                </label>
+                <button
+                  type="button"
+                  onClick={onOpenInventory}
+                  className="inline-flex items-center gap-1 text-xs font-medium text-[#1e3a8a] hover:text-[#1e40af] cursor-pointer whitespace-nowrap"
+                >
+                  <Boxes className="w-3.5 h-3.5" />
+                  Manage Inventory
+                </button>
+              </div>
+              <select
+                id="purchaseInventorySelect"
+                value={selectedInventoryId}
+                onChange={(e) => handleInventorySelectChange(e.target.value)}
+                className="w-full px-3.5 py-2.5 text-sm text-slate-900 bg-white border border-slate-300 rounded-md focus:outline-none focus:border-[#1e3a8a] focus:ring-1 focus:ring-[#1e3a8a]"
+              >
+                <option value="">
+                  {sortedInventory.length > 0
+                    ? 'Select tracked inventory item to auto-increase stock...'
+                    : 'No inventory items yet — enter custom item below'}
+                </option>
+                {sortedInventory.map((inv) => (
+                  <option key={inv.id} value={inv.id}>
+                    {inv.itemName} ({inv.unit}) — Current Stock:{' '}
+                    {formatNumber(inv.currentStock)} {inv.unit}
+                  </option>
+                ))}
+                <option value="custom">
+                  Custom / Non-Inventory Item (manual entry)
+                </option>
+              </select>
+              {linkedInventoryItem && (
+                <p className="mt-1.5 flex items-center gap-1.5 text-xs text-emerald-700">
+                  <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                  Linked to Inventory:{' '}
+                  <strong>{linkedInventoryItem.itemName}</strong> stock will
+                  increase automatically upon saving.
+                </p>
               )}
             </div>
 
@@ -328,11 +532,16 @@ export function NewPurchasePage({
                   type="text"
                   list="mill-purchase-items"
                   required
+                  readOnly={Boolean(explicitInventoryItem)}
                   maxLength={PURCHASE_VALIDATION.itemNameMax}
                   value={itemName}
                   onChange={(e) => setItemName(e.target.value)}
-                  placeholder="e.g. Jute, Bleaching, Spare Parts"
-                  className="w-full px-3.5 py-2.5 text-sm text-slate-900 bg-white border border-slate-300 rounded-md focus:outline-none focus:border-[#1e3a8a] focus:ring-1 focus:ring-[#1e3a8a]"
+                  placeholder="e.g. Jute, Bleaching, Soda, Spare Parts"
+                  className={`w-full px-3.5 py-2.5 text-sm text-slate-900 border border-slate-300 rounded-md focus:outline-none focus:border-[#1e3a8a] focus:ring-1 focus:ring-[#1e3a8a] ${
+                    explicitInventoryItem
+                      ? 'bg-slate-50 text-slate-700 cursor-not-allowed'
+                      : 'bg-white'
+                  }`}
                 />
                 <datalist id="mill-purchase-items">
                   {COMMON_MILL_ITEMS.map((item) => (
@@ -375,9 +584,14 @@ export function NewPurchasePage({
                 <select
                   id="purchaseUnit"
                   required
+                  disabled={Boolean(explicitInventoryItem)}
                   value={unit}
                   onChange={(e) => setUnit(e.target.value as PurchaseUnit)}
-                  className="w-full px-3.5 py-2.5 text-sm text-slate-900 bg-white border border-slate-300 rounded-md focus:outline-none focus:border-[#1e3a8a] focus:ring-1 focus:ring-[#1e3a8a]"
+                  className={`w-full px-3.5 py-2.5 text-sm text-slate-900 border border-slate-300 rounded-md focus:outline-none focus:border-[#1e3a8a] focus:ring-1 focus:ring-[#1e3a8a] ${
+                    explicitInventoryItem
+                      ? 'bg-slate-50 text-slate-700 cursor-not-allowed'
+                      : 'bg-white'
+                  }`}
                 >
                   {PURCHASE_UNITS.map((u) => (
                     <option key={u} value={u}>
@@ -426,7 +640,9 @@ export function NewPurchasePage({
                 </p>
               </div>
               <p className="font-mono text-xl font-semibold tabular-nums text-slate-900">
-                {calculatedTotal !== null ? formatCurrency(calculatedTotal) : '৳0.00'}
+                {calculatedTotal !== null
+                  ? formatCurrency(calculatedTotal)
+                  : '৳0.00'}
               </p>
             </div>
           </div>
@@ -454,15 +670,22 @@ export function NewPurchasePage({
           </div>
         </form>
 
-        {/* Right Atomic Ledger Preview */}
+        {/* Right Atomic Ledger & Inventory Preview */}
         <aside className="bg-white border border-slate-200 rounded-lg p-6 space-y-5">
           <div>
             <h3 className="font-display text-sm font-semibold text-slate-900">
-              Atomic Payable Posting
+              Atomic Posting Preview
             </h3>
             <p className="text-xs text-slate-500 mt-0.5">
-              Writes to <span className="font-mono">purchases</span> and{' '}
-              <span className="font-mono">supplier_ledger</span> together
+              Writes to <span className="font-mono">purchases</span>,{' '}
+              <span className="font-mono">supplier_ledger</span>
+              {linkedInventoryItem ? (
+                <>
+                  , <span className="font-mono">inventory</span> &amp;{' '}
+                  <span className="font-mono">stock_movements</span>
+                </>
+              ) : null}{' '}
+              atomically
             </p>
           </div>
 
@@ -486,22 +709,36 @@ export function NewPurchasePage({
               </dd>
             </div>
             <div className="py-3 flex items-center justify-between gap-4">
-              <dt className="text-xs text-slate-500">Ledger Type</dt>
-              <dd className="font-mono text-xs text-slate-800">
-                txn_type: &quot;purchase&quot;
+              <dt className="text-xs text-slate-500">Supplier Credit (+Debt)</dt>
+              <dd className="font-mono text-sm font-semibold tabular-nums text-red-700">
+                {calculatedTotal !== null
+                  ? formatCurrency(calculatedTotal)
+                  : '৳0.00'}
               </dd>
             </div>
             <div className="py-3 flex items-center justify-between gap-4">
-              <dt className="text-xs text-slate-500">Supplier Credit (+Debt)</dt>
-              <dd className="font-mono text-sm font-semibold tabular-nums text-red-700">
-                {calculatedTotal !== null ? formatCurrency(calculatedTotal) : '৳0.00'}
+              <dt className="text-xs text-slate-500">Inventory Stock Sync</dt>
+              <dd className="font-mono text-xs tabular-nums text-right">
+                {linkedInventoryItem ? (
+                  <span className="font-semibold text-emerald-700">
+                    {formatNumber(linkedInventoryItem.currentStock)} →{' '}
+                    {formatNumber(
+                      projectedNewStock ?? linkedInventoryItem.currentStock
+                    )}{' '}
+                    {linkedInventoryItem.unit}
+                  </span>
+                ) : (
+                  <span className="text-slate-400">Not linked</span>
+                )}
               </dd>
             </div>
           </dl>
 
           <p className="text-xs text-slate-500 leading-relaxed pt-3 border-t border-slate-200">
-            Reference <span className="font-mono text-slate-700">PUR-[AutoID]</span> is
-            generated automatically and linked identically across both collections.
+            Reference{' '}
+            <span className="font-mono text-slate-700">PUR-[AutoID]</span> is
+            generated automatically and linked identically across supplier
+            payables and inventory history.
           </p>
         </aside>
       </div>

@@ -181,7 +181,7 @@
     },
     "MoneyInRecord": {
       "title": "MoneyInRecord",
-      "description": "An immutable cash/bank/mobile-banking inflow record created atomically alongside a client_ledger payment credit entry.",
+      "description": "An immutable cash/bank/mobile-banking inflow record created atomically alongside a client_ledger payment credit entry (PAY-*) or as a cash reversal adjustment (REV-*).",
       "type": "object",
       "properties": {
         "ownerId": {
@@ -189,6 +189,10 @@
           "minLength": 1,
           "maxLength": 128,
           "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "source": {
+          "type": "string",
+          "enum": ["client", "adjustment"]
         },
         "clientId": {
           "type": "string",
@@ -206,7 +210,7 @@
           "type": "string",
           "minLength": 5,
           "maxLength": 80,
-          "pattern": "^PAY-[a-zA-Z0-9_\\-]+$"
+          "pattern": "^(PAY|REV)-[a-zA-Z0-9_\\-]+$"
         },
         "amount": {
           "type": "number"
@@ -233,8 +237,6 @@
       },
       "required": [
         "ownerId",
-        "clientId",
-        "ledgerEntryId",
         "reference",
         "amount",
         "paymentDate",
@@ -394,7 +396,15 @@
         "totalAmount": {
           "type": "number"
         },
+        "status": {
+          "type": "string",
+          "enum": ["Pending", "Paid"]
+        },
         "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
           "type": "string",
           "format": "date-time"
         }
@@ -415,7 +425,7 @@
     },
     "MoneyOutRecord": {
       "title": "MoneyOutRecord",
-      "description": "An immutable cash/bank outflow record created atomically alongside a supplier_ledger payment debit entry.",
+      "description": "An immutable cash/bank outflow record created atomically alongside a supplier_ledger payment debit entry (SPAY-*), a factory expense record (EXP-*), an employee weekly advance (ADV-*), or a cash reversal adjustment (REV-*).",
       "type": "object",
       "properties": {
         "ownerId": {
@@ -423,6 +433,10 @@
           "minLength": 1,
           "maxLength": 128,
           "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "source": {
+          "type": "string",
+          "enum": ["supplier", "expense", "advance", "adjustment"]
         },
         "supplierId": {
           "type": "string",
@@ -436,16 +450,367 @@
           "maxLength": 128,
           "pattern": "^[a-zA-Z0-9_\\-]+$"
         },
+        "expenseId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "employeeId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "advanceId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "category": {
+          "type": "string",
+          "enum": [
+            "Salary",
+            "Electricity",
+            "Rent",
+            "Transport",
+            "Maintenance",
+            "Food",
+            "Office",
+            "Other",
+            "Employee Advance"
+          ]
+        },
         "reference": {
           "type": "string",
-          "minLength": 6,
+          "minLength": 5,
           "maxLength": 80,
-          "pattern": "^SPAY-[a-zA-Z0-9_\\-]+$"
+          "pattern": "^(SPAY|EXP|ADV|REV)-[a-zA-Z0-9_\\-]+$"
         },
         "amount": {
           "type": "number"
         },
         "paymentDate": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 10,
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "paymentMethod": {
+          "type": "string",
+          "enum": ["Cash", "Bank", "Mobile Banking"]
+        },
+        "note": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 300
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "ownerId",
+        "reference",
+        "amount",
+        "paymentDate",
+        "paymentMethod",
+        "note",
+        "createdAt"
+      ]
+    },
+    "Expense": {
+      "title": "Expense",
+      "description": "An immutable factory operating expense (salary, electricity, rent, transport, maintenance, food, office, other) paired atomically with a money_out cash/bank outflow document.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "moneyOutId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "reference": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 80,
+          "pattern": "^EXP-[a-zA-Z0-9_\\-]+$"
+        },
+        "expenseDate": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 10,
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "category": {
+          "type": "string",
+          "enum": [
+            "Salary",
+            "Electricity",
+            "Rent",
+            "Transport",
+            "Maintenance",
+            "Food",
+            "Office",
+            "Other"
+          ]
+        },
+        "amount": {
+          "type": "number"
+        },
+        "paymentMethod": {
+          "type": "string",
+          "enum": ["Cash", "Bank"]
+        },
+        "description": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 300
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "ownerId",
+        "moneyOutId",
+        "reference",
+        "expenseDate",
+        "category",
+        "amount",
+        "paymentMethod",
+        "description",
+        "createdAt"
+      ]
+    },
+    "InventoryItem": {
+      "title": "InventoryItem",
+      "description": "A mill chemical, dye, jute, or spare parts stock item with a minimum stock alert level and live current stock.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "itemName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "unit": {
+          "type": "string",
+          "enum": ["KG", "Liter", "Pcs"]
+        },
+        "minStockLevel": {
+          "type": "number"
+        },
+        "currentStock": {
+          "type": "number"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "ownerId",
+        "itemName",
+        "unit",
+        "minStockLevel",
+        "currentStock",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "StockMovement": {
+      "title": "StockMovement",
+      "description": "An immutable append-only audit log entry recording opening stock, manual Stock In, manual Stock Out, or Purchase In stock adjustments.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "inventoryItemId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "itemName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "unit": {
+          "type": "string",
+          "enum": ["KG", "Liter", "Pcs"]
+        },
+        "type": {
+          "type": "string",
+          "enum": ["opening", "in", "out", "purchase"]
+        },
+        "quantity": {
+          "type": "number"
+        },
+        "previousStock": {
+          "type": "number"
+        },
+        "resultingStock": {
+          "type": "number"
+        },
+        "movementDate": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 10,
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "reference": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 80
+        },
+        "note": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 300
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "ownerId",
+        "inventoryItemId",
+        "itemName",
+        "unit",
+        "type",
+        "quantity",
+        "previousStock",
+        "resultingStock",
+        "movementDate",
+        "reference",
+        "note",
+        "createdAt"
+      ]
+    },
+    "Employee": {
+      "title": "Employee",
+      "description": "A mill worker or staff profile with department, joining date, contact mobile, and basic monthly salary.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "mobile": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 25,
+          "pattern": "^[+0-9 ()-]+$"
+        },
+        "department": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "joiningDate": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 10,
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "basicSalary": {
+          "type": "number"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "ownerId",
+        "name",
+        "mobile",
+        "department",
+        "joiningDate",
+        "basicSalary",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "EmployeeAdvance": {
+      "title": "EmployeeAdvance",
+      "description": "An immutable weekly salary advance given to an employee, atomically paired with a money_out outflow document with category Employee Advance and reference ADV-*.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "employeeId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "employeeName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "department": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "moneyOutId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "reference": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 80,
+          "pattern": "^ADV-[a-zA-Z0-9_\\-]+$"
+        },
+        "amount": {
+          "type": "number"
+        },
+        "advanceDate": {
           "type": "string",
           "minLength": 10,
           "maxLength": 10,
@@ -467,11 +832,13 @@
       },
       "required": [
         "ownerId",
-        "supplierId",
-        "ledgerEntryId",
+        "employeeId",
+        "employeeName",
+        "department",
+        "moneyOutId",
         "reference",
         "amount",
-        "paymentDate",
+        "advanceDate",
         "paymentMethod",
         "note",
         "createdAt"
@@ -509,7 +876,27 @@
     },
     "/money_out/{paymentId}": {
       "schema": { "$ref": "#/entities/MoneyOutRecord" },
-      "description": "Append-only supplier cash/bank payment outflows atomically paired with supplier_ledger debit entries."
+      "description": "Append-only cash/bank outflows atomically paired with supplier_ledger debit entries (SPAY-*), factory expenses (EXP-*), or employee advances (ADV-*)."
+    },
+    "/expenses/{expenseId}": {
+      "schema": { "$ref": "#/entities/Expense" },
+      "description": "Append-only daily factory operating expenses atomically paired with money_out cash/bank outflow documents."
+    },
+    "/inventory/{itemId}": {
+      "schema": { "$ref": "#/entities/InventoryItem" },
+      "description": "Tracks mill chemicals, jute, dyes, and spare parts with live currentStock and minimum stock alert thresholds."
+    },
+    "/stock_movements/{movementId}": {
+      "schema": { "$ref": "#/entities/StockMovement" },
+      "description": "Append-only stock movement audit log for opening balances, Stock In, Stock Out, and Purchase In additions."
+    },
+    "/employees/{employeeId}": {
+      "schema": { "$ref": "#/entities/Employee" },
+      "description": "Stores mill employee profiles, departments, joining dates, and basic monthly salaries."
+    },
+    "/employee_advances/{advanceId}": {
+      "schema": { "$ref": "#/entities/EmployeeAdvance" },
+      "description": "Append-only weekly advance log per employee atomically paired with money_out outflows (ADV-*)."
     }
   }
 }

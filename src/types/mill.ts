@@ -15,6 +15,9 @@ export type NavSection =
   | 'suppliers'
   | 'purchases'
   | 'new-purchase'
+  | 'inventory'
+  | 'expenses'
+  | 'employees'
   | 'ledger'
   | 'overview';
 
@@ -42,11 +45,61 @@ export type OrderStatus = InProgressOrderStatus | 'Delivered';
 export const PAYMENT_METHODS = ['Cash', 'Bank', 'Mobile Banking'] as const;
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 
+export type PurchaseStatus = 'Pending' | 'Paid';
+
 export const SUPPLIER_PAYMENT_METHODS = ['Cash', 'Bank'] as const;
 export type SupplierPaymentMethod = (typeof SUPPLIER_PAYMENT_METHODS)[number];
 
+export const EXPENSE_PAYMENT_METHODS = ['Cash', 'Bank'] as const;
+export type ExpensePaymentMethod = (typeof EXPENSE_PAYMENT_METHODS)[number];
+
+export const EXPENSE_CATEGORIES = [
+  'Salary',
+  'Electricity',
+  'Rent',
+  'Transport',
+  'Maintenance',
+  'Food',
+  'Office',
+  'Other',
+] as const;
+export type ExpenseCategory = (typeof EXPENSE_CATEGORIES)[number];
+
 export const PURCHASE_UNITS = ['KG', 'Liter', 'Pcs'] as const;
 export type PurchaseUnit = (typeof PURCHASE_UNITS)[number];
+
+export const INVENTORY_UNITS = PURCHASE_UNITS;
+export type InventoryUnit = PurchaseUnit;
+
+export const INVENTORY_ITEM_PRESETS = [
+  'Jute',
+  'Bleaching',
+  'Soda',
+  'Casting',
+  'Acid',
+  'Blue',
+  'BMB',
+  'Spare Parts',
+  'Other',
+] as const;
+export type InventoryItemPreset = (typeof INVENTORY_ITEM_PRESETS)[number];
+
+export type StockMovementType = 'opening' | 'in' | 'out' | 'purchase';
+
+export const EMPLOYEE_DEPARTMENTS = [
+  'Dyeing',
+  'Washing',
+  'Finishing',
+  'Boiler',
+  'Maintenance',
+  'Store',
+  'Admin',
+  'Other',
+] as const;
+export type EmployeeDepartment = (typeof EMPLOYEE_DEPARTMENTS)[number];
+
+export const ADVANCE_PAYMENT_METHODS = ['Cash', 'Bank'] as const;
+export type AdvancePaymentMethod = (typeof ADVANCE_PAYMENT_METHODS)[number];
 
 export interface ClientRecord {
   id: string;
@@ -91,6 +144,7 @@ export interface OrderRecord {
 export interface MoneyInRecord {
   id: string;
   ownerId: string;
+  source?: 'client' | 'adjustment';
   clientId: string;
   ledgerEntryId: string;
   reference: string;
@@ -135,18 +189,92 @@ export interface PurchaseRecord {
   unit: PurchaseUnit;
   rate: number;
   totalAmount: number;
+  status: PurchaseStatus;
   createdAt: Timestamp | null;
+  updatedAt?: Timestamp | null;
 }
 
 export interface MoneyOutRecord {
   id: string;
   ownerId: string;
+  source: 'supplier' | 'expense' | 'advance' | 'adjustment';
   supplierId: string;
   ledgerEntryId: string;
+  expenseId: string;
+  employeeId: string;
+  advanceId: string;
+  category: ExpenseCategory | 'Employee Advance' | null;
   reference: string;
   amount: number;
   paymentDate: string;
-  paymentMethod: SupplierPaymentMethod;
+  paymentMethod: PaymentMethod;
+  note: string;
+  createdAt: Timestamp | null;
+}
+
+export interface ExpenseRecord {
+  id: string;
+  ownerId: string;
+  moneyOutId: string;
+  reference: string;
+  expenseDate: string;
+  category: ExpenseCategory;
+  amount: number;
+  paymentMethod: ExpensePaymentMethod;
+  description: string;
+  createdAt: Timestamp | null;
+}
+
+export interface InventoryItem {
+  id: string;
+  ownerId: string;
+  itemName: string;
+  unit: InventoryUnit;
+  minStockLevel: number;
+  currentStock: number;
+  createdAt: Timestamp | null;
+  updatedAt: Timestamp | null;
+}
+
+export interface StockMovementRecord {
+  id: string;
+  ownerId: string;
+  inventoryItemId: string;
+  itemName: string;
+  unit: InventoryUnit;
+  type: StockMovementType;
+  quantity: number;
+  previousStock: number;
+  resultingStock: number;
+  movementDate: string;
+  reference: string;
+  note: string;
+  createdAt: Timestamp | null;
+}
+
+export interface EmployeeRecord {
+  id: string;
+  ownerId: string;
+  name: string;
+  mobile: string;
+  department: string;
+  joiningDate: string;
+  basicSalary: number;
+  createdAt: Timestamp | null;
+  updatedAt: Timestamp | null;
+}
+
+export interface EmployeeAdvanceRecord {
+  id: string;
+  ownerId: string;
+  employeeId: string;
+  employeeName: string;
+  department: string;
+  moneyOutId: string;
+  reference: string;
+  amount: number;
+  advanceDate: string;
+  paymentMethod: AdvancePaymentMethod;
   note: string;
   createdAt: Timestamp | null;
 }
@@ -223,3 +351,37 @@ export const PURCHASE_VALIDATION = {
   maxTotalAmount: 1000000000,
   datePattern: /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/,
 } as const;
+
+export const EXPENSE_VALIDATION = {
+  maxAmount: 1000000000,
+  descriptionMax: 300,
+  datePattern: /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/,
+} as const;
+
+export const INVENTORY_VALIDATION = {
+  itemNameMin: 1,
+  itemNameMax: 120,
+  maxStock: 10000000,
+  noteMax: 300,
+  datePattern: /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/,
+} as const;
+
+export const EMPLOYEE_VALIDATION = {
+  nameMin: 1,
+  nameMax: 120,
+  mobileMin: 5,
+  mobileMax: 25,
+  mobilePattern: /^[+0-9 ()-]+$/,
+  departmentMin: 1,
+  departmentMax: 60,
+  maxSalary: 100000000,
+  datePattern: /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/,
+} as const;
+
+export const ADVANCE_VALIDATION = {
+  maxAmount: 1000000000,
+  noteMax: 300,
+  datePattern: /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/,
+} as const;
+
+

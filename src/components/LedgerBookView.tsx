@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { BookOpen, Search } from 'lucide-react';
+import { BookOpen, Printer, Search } from 'lucide-react';
 import type {
   ClientLedgerEntry,
   ClientRecord,
@@ -20,6 +20,7 @@ interface LedgerBookViewProps {
   clientsById: Map<string, ClientRecord>;
   isLoading: boolean;
   onOpenLedger: (client: ClientRecord) => void;
+  onPrintInvoiceEntry: (entry: ClientLedgerEntry) => void;
 }
 
 export function LedgerBookView({
@@ -27,6 +28,7 @@ export function LedgerBookView({
   clientsById,
   isLoading,
   onOpenLedger,
+  onPrintInvoiceEntry,
 }: LedgerBookViewProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
@@ -168,7 +170,8 @@ export function LedgerBookView({
                   <th className="py-3 px-4">Type & Reference</th>
                   <th className="py-3 px-4">Note</th>
                   <th className="py-3 px-4 text-right">Debit</th>
-                  <th className="py-3 px-5 text-right">Credit</th>
+                  <th className="py-3 px-4 text-right">Credit</th>
+                  <th className="py-3 px-5 text-right">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200 text-sm">
@@ -215,13 +218,30 @@ export function LedgerBookView({
                           <span className="text-slate-400">—</span>
                         )}
                       </td>
-                      <td className="py-3 px-5 text-right font-mono text-xs tabular-nums whitespace-nowrap">
+                      <td className="py-3 px-4 text-right font-mono text-xs tabular-nums whitespace-nowrap">
                         {entry.credit > 0 ? (
                           <span className="font-medium text-emerald-700">
                             {formatCurrency(entry.credit)}
                           </span>
                         ) : (
                           <span className="text-slate-400">—</span>
+                        )}
+                      </td>
+                      <td className="py-3 px-5 text-right whitespace-nowrap">
+                        {entry.txn_type === 'invoice' ? (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onPrintInvoiceEntry(entry);
+                            }}
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-[#1e3a8a] bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded transition-colors cursor-pointer whitespace-nowrap"
+                          >
+                            <Printer className="w-3.5 h-3.5 shrink-0" />
+                            Print Invoice
+                          </button>
+                        ) : (
+                          <span className="text-xs text-slate-300">—</span>
                         )}
                       </td>
                     </tr>

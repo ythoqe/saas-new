@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
-import { Banknote, Edit2, Plus, X } from 'lucide-react';
+import { Banknote, Edit2, Plus, Printer, X } from 'lucide-react';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import {
   LEDGER_VALIDATION,
@@ -31,6 +31,8 @@ interface ClientLedgerDrawerProps {
   onClose: () => void;
   onEditClient: (client: ClientRecord) => void;
   onReceivePayment: (client: ClientRecord) => void;
+  onPrintInvoiceEntry: (entry: ClientLedgerEntry) => void;
+  onPrintStatement: (client: ClientRecord) => void;
   onSuccess: (message: string) => void;
 }
 
@@ -43,6 +45,8 @@ export function ClientLedgerDrawer({
   onClose,
   onEditClient,
   onReceivePayment,
+  onPrintInvoiceEntry,
+  onPrintStatement,
   onSuccess,
 }: ClientLedgerDrawerProps) {
   const [activeTab, setActiveTab] = useState<ClientDrawerTab>(initialTab);
@@ -297,38 +301,49 @@ export function ClientLedgerDrawer({
           </div>
         </div>
 
-        {/* Tab Bar: Full Ledger vs Payment History */}
+        {/* Tab Bar: Full Ledger vs Payment History + Print Statement */}
         <div className="px-6 py-3 border-b border-slate-200 bg-white flex flex-wrap items-center justify-between gap-3 shrink-0">
-          <div
-            role="tablist"
-            aria-label="Client financial views"
-            className="inline-flex items-center gap-1 p-1 bg-slate-100 rounded-md"
-          >
+          <div className="flex flex-wrap items-center gap-2">
+            <div
+              role="tablist"
+              aria-label="Client financial views"
+              className="inline-flex items-center gap-1 p-1 bg-slate-100 rounded-md"
+            >
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeTab === 'ledger'}
+                onClick={() => setActiveTab('ledger')}
+                className={`px-3 py-1.5 text-xs font-medium rounded transition-colors cursor-pointer whitespace-nowrap ${
+                  activeTab === 'ledger'
+                    ? 'bg-white text-slate-900 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Full Ledger ({clientEntries.length})
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeTab === 'payments'}
+                onClick={() => setActiveTab('payments')}
+                className={`px-3 py-1.5 text-xs font-medium rounded transition-colors cursor-pointer whitespace-nowrap ${
+                  activeTab === 'payments'
+                    ? 'bg-white text-slate-900 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Payment History ({paymentHistoryRows.length})
+              </button>
+            </div>
+
             <button
               type="button"
-              role="tab"
-              aria-selected={activeTab === 'ledger'}
-              onClick={() => setActiveTab('ledger')}
-              className={`px-3 py-1.5 text-xs font-medium rounded transition-colors cursor-pointer whitespace-nowrap ${
-                activeTab === 'ledger'
-                  ? 'bg-white text-slate-900 shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
+              onClick={() => onPrintStatement(client)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-[#1e3a8a] bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-md transition-colors cursor-pointer whitespace-nowrap"
             >
-              Full Ledger ({clientEntries.length})
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeTab === 'payments'}
-              onClick={() => setActiveTab('payments')}
-              className={`px-3 py-1.5 text-xs font-medium rounded transition-colors cursor-pointer whitespace-nowrap ${
-                activeTab === 'payments'
-                  ? 'bg-white text-slate-900 shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Payment History ({paymentHistoryRows.length})
+              <Printer className="w-3.5 h-3.5 shrink-0" />
+              Print Statement
             </button>
           </div>
 
@@ -536,6 +551,7 @@ export function ClientLedgerDrawer({
                           <th className="py-2.5 px-4 text-right">Debit</th>
                           <th className="py-2.5 px-4 text-right">Credit</th>
                           <th className="py-2.5 px-4 text-right">Balance</th>
+                          <th className="py-2.5 px-4 text-right">Print</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-200 text-sm">
@@ -592,6 +608,20 @@ export function ClientLedgerDrawer({
                               >
                                 {formatCurrency(runningBalance)}
                               </span>
+                            </td>
+                            <td className="py-3 px-4 align-top text-right whitespace-nowrap">
+                              {entry.txn_type === 'invoice' ? (
+                                <button
+                                  type="button"
+                                  onClick={() => onPrintInvoiceEntry(entry)}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-[#1e3a8a] bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded transition-colors cursor-pointer whitespace-nowrap"
+                                >
+                                  <Printer className="w-3.5 h-3.5 shrink-0" />
+                                  Print Invoice
+                                </button>
+                              ) : (
+                                <span className="text-xs text-slate-300">—</span>
+                              )}
                             </td>
                           </tr>
                         ))}

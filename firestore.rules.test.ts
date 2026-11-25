@@ -7,7 +7,16 @@
 export interface AdversarialTestCase {
   id: number;
   name: string;
-  collection: 'clients' | 'client_ledger' | 'orders';
+  collection:
+    | 'clients'
+    | 'client_ledger'
+    | 'orders'
+    | 'expenses'
+    | 'money_out'
+    | 'inventory'
+    | 'stock_movements'
+    | 'employees'
+    | 'employee_advances';
   operation: 'get' | 'list' | 'create' | 'update' | 'delete';
   auth: { uid: string; email_verified: boolean } | null;
   docId?: string;
@@ -205,4 +214,136 @@ export const dirtyDozenTestCases: AdversarialTestCase[] = [
     },
     expected: 'PERMISSION_DENIED',
   },
+  {
+    id: 13,
+    name: 'Orphaned expense without atomic money_out document',
+    collection: 'expenses',
+    operation: 'create',
+    auth: { uid: 'userA', email_verified: true },
+    docId: 'EXP-ABCD1234',
+    payload: {
+      ownerId: 'userA',
+      moneyOutId: 'EXP-ABCD1234',
+      reference: 'EXP-ABCD1234',
+      expenseDate: '2026-11-25',
+      category: 'Electricity',
+      amount: 15000,
+      paymentMethod: 'Bank',
+      description: 'November electricity bill',
+    },
+    expected: 'PERMISSION_DENIED',
+  },
+  {
+    id: 14,
+    name: 'Invalid expense category & shadow field injection on expenses',
+    collection: 'expenses',
+    operation: 'create',
+    auth: { uid: 'userA', email_verified: true },
+    docId: 'EXP-BADCAT01',
+    payload: {
+      ownerId: 'userA',
+      moneyOutId: 'EXP-BADCAT01',
+      reference: 'EXP-BADCAT01',
+      expenseDate: '2026-11-25',
+      category: 'PersonalVacation',
+      amount: 5000,
+      paymentMethod: 'Cash',
+      description: 'Invalid category',
+      approvedBy: 'spoofed',
+    },
+    expected: 'PERMISSION_DENIED',
+  },
+  {
+    id: 15,
+    name: 'Expense mutation/deletion attempt (append-only enforcement)',
+    collection: 'expenses',
+    operation: 'delete',
+    auth: { uid: 'userA', email_verified: true },
+    docId: 'EXP-ABCD1234',
+    expected: 'PERMISSION_DENIED',
+  },
+  {
+    id: 16,
+    name: 'Negative stock update on inventory item',
+    collection: 'inventory',
+    operation: 'update',
+    auth: { uid: 'userA', email_verified: true },
+    docId: 'INV-BLEACH01',
+    payload: {
+      currentStock: -15,
+    },
+    expected: 'PERMISSION_DENIED',
+  },
+  {
+    id: 17,
+    name: 'Desynced stock movement arithmetic (resultingStock != previousStock - quantity)',
+    collection: 'stock_movements',
+    operation: 'create',
+    auth: { uid: 'userA', email_verified: true },
+    docId: 'MOV-FORGED01',
+    payload: {
+      ownerId: 'userA',
+      inventoryItemId: 'INV-BLEACH01',
+      itemName: 'Bleaching',
+      unit: 'KG',
+      type: 'out',
+      quantity: 20,
+      previousStock: 100,
+      resultingStock: 95,
+      movementDate: '2026-11-25',
+      reference: 'MOV-FORGED01',
+      note: 'Forged arithmetic',
+    },
+    expected: 'PERMISSION_DENIED',
+  },
+  {
+    id: 18,
+    name: 'Immutable stock_movements tamper attempt',
+    collection: 'stock_movements',
+    operation: 'delete',
+    auth: { uid: 'userA', email_verified: true },
+    docId: 'MOV-VALID001',
+    expected: 'PERMISSION_DENIED',
+  },
+  {
+    id: 19,
+    name: 'Cross-tenant employee PII read (GET)',
+    collection: 'employees',
+    operation: 'get',
+    auth: { uid: 'userB', email_verified: true },
+    docId: 'EMP-USERA001',
+    expected: 'PERMISSION_DENIED',
+  },
+  {
+    id: 20,
+    name: 'Orphaned employee advance without atomic money_out outflow',
+    collection: 'employee_advances',
+    operation: 'create',
+    auth: { uid: 'userA', email_verified: true },
+    docId: 'ADV-ORPHAN01',
+    payload: {
+      ownerId: 'userA',
+      employeeId: 'EMP-USERA001',
+      employeeName: 'Sohel Mia',
+      department: 'Dyeing',
+      moneyOutId: 'ADV-ORPHAN01',
+      reference: 'ADV-ORPHAN01',
+      amount: 2000,
+      advanceDate: '2026-11-25',
+      paymentMethod: 'Cash',
+      note: 'Weekly advance without money_out batch',
+    },
+    expected: 'PERMISSION_DENIED',
+  },
+  {
+    id: 21,
+    name: 'Immutable employee_advances tamper attempt',
+    collection: 'employee_advances',
+    operation: 'delete',
+    auth: { uid: 'userA', email_verified: true },
+    docId: 'ADV-VALID001',
+    expected: 'PERMISSION_DENIED',
+  },
 ];
+
+

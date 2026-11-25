@@ -5,7 +5,9 @@ import {
   CheckCircle2,
   ClipboardList,
   Plus,
+  Printer,
   Search,
+  Truck,
 } from 'lucide-react';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import {
@@ -35,6 +37,8 @@ interface OrdersListViewProps {
   onCreateNewOrder: () => void;
   onStartCompleteDeliver: (order: OrderRecord) => void;
   onOpenClientLedger: (client: ClientRecord) => void;
+  onPrintInvoice: (order: OrderRecord) => void;
+  onPrintChallan: (order: OrderRecord) => void;
   onStatusUpdated: (message: string) => void;
 }
 
@@ -46,6 +50,8 @@ export function OrdersListView({
   onCreateNewOrder,
   onStartCompleteDeliver,
   onOpenClientLedger,
+  onPrintInvoice,
+  onPrintChallan,
   onStatusUpdated,
 }: OrdersListViewProps) {
   const [searchQuery, setSearchQuery] = useState('');
@@ -458,16 +464,36 @@ export function OrdersListView({
 
                       <td className="py-3.5 px-5 text-right whitespace-nowrap">
                         {isDelivered ? (
-                          client ? (
+                          <div className="inline-flex items-center justify-end gap-1.5">
                             <button
                               type="button"
-                              onClick={() => onOpenClientLedger(client)}
-                              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-[#1e3a8a] bg-blue-50/70 hover:bg-blue-100/80 rounded-md transition-colors cursor-pointer whitespace-nowrap"
+                              onClick={() => onPrintInvoice(order)}
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-white bg-[#1e3a8a] hover:bg-[#1e40af] rounded-md transition-colors cursor-pointer whitespace-nowrap"
                             >
-                              <BookOpen className="w-3.5 h-3.5" />
-                              View Ledger
+                              <Printer className="w-3.5 h-3.5 shrink-0" />
+                              Print Invoice
                             </button>
-                          ) : null
+                            <button
+                              type="button"
+                              onClick={() => onPrintChallan(order)}
+                              title="Print Delivery Challan (without prices)"
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-md transition-colors cursor-pointer whitespace-nowrap"
+                            >
+                              <Truck className="w-3.5 h-3.5 shrink-0 text-slate-500" />
+                              Challan
+                            </button>
+                            {client ? (
+                              <button
+                                type="button"
+                                onClick={() => onOpenClientLedger(client)}
+                                title="Open client ledger"
+                                className="inline-flex items-center gap-1 px-2 py-1.5 text-xs font-medium text-[#1e3a8a] bg-blue-50/70 hover:bg-blue-100/80 rounded-md transition-colors cursor-pointer whitespace-nowrap"
+                              >
+                                <BookOpen className="w-3.5 h-3.5" />
+                                Ledger
+                              </button>
+                            ) : null}
+                          </div>
                         ) : (
                           <button
                             type="button"

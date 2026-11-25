@@ -15,6 +15,7 @@ import {
 import type {
   ClientLedgerEntry,
   ClientRecord,
+  EmployeeRecord,
   MoneyInRecord,
   MoneyOutRecord,
   NavSection,
@@ -42,6 +43,7 @@ interface DashboardOverviewProps {
   moneyOutRecords: MoneyOutRecord[];
   clientsById: Map<string, ClientRecord>;
   suppliersById: Map<string, SupplierRecord>;
+  employeesById: Map<string, EmployeeRecord>;
   isLoading: boolean;
   onNavigate: (section: NavSection) => void;
   onStartCompleteDeliver: (order: OrderRecord) => void;
@@ -65,6 +67,7 @@ type UnifiedTransaction =
     }
   | {
       kind: 'money_out';
+      subType: 'supplier' | 'expense' | 'advance';
       id: string;
       reference: string;
       amount: number;
@@ -109,6 +112,7 @@ export function DashboardOverview({
   moneyOutRecords,
   clientsById,
   suppliersById,
+  employeesById,
   isLoading,
   onNavigate,
   onStartCompleteDeliver,
@@ -221,9 +225,63 @@ export function DashboardOverview({
     });
 
     const outgoing: UnifiedTransaction[] = moneyOutRecords.map((rec) => {
+      const isAdvance =
+        rec.source === 'advance' ||
+        rec.reference.startsWith('ADV-') ||
+        rec.category === 'Employee Advance';
+      if (isAdvance) {
+        const employee = rec.employeeId
+          ? employeesById.get(rec.employeeId)
+          : undefined;
+        const advanceLabel = employee
+          ? `Employee Advance — ${employee.name}`
+          : rec.note || 'Employee Advance';
+        return {
+          kind: 'money_out',
+          subType: 'advance',
+          id: `out-${rec.id}`,
+          reference: rec.reference || rec.id,
+          amount: rec.amount,
+          paymentDate: rec.paymentDate,
+          paymentMethod: rec.paymentMethod,
+          note: rec.note,
+          counterpartyId: rec.employeeId || rec.id,
+          counterpartyName: advanceLabel,
+          sortTimestamp:
+            timestampToDate(rec.createdAt)?.getTime() ??
+            getIsoDateFallbackMs(rec.paymentDate),
+        };
+      }
+
+      const isExpense =
+        rec.source === 'expense' || rec.reference.startsWith('EXP-');
+      if (isExpense) {
+        const expenseLabel = rec.category
+          ? `${rec.category} Expense`
+          : 'Factory Expense';
+        return {
+          kind: 'money_out',
+          subType: 'expense',
+          id: `out-${rec.id}`,
+          reference: rec.reference || rec.id,
+          amount: rec.amount,
+          paymentDate: rec.paymentDate,
+          paymentMethod: rec.paymentMethod,
+          note: rec.note,
+          counterpartyId: rec.expenseId || rec.id,
+          counterpartyName: rec.note
+            ? `${expenseLabel} — ${rec.note}`
+            : expenseLabel,
+          sortTimestamp:
+            timestampToDate(rec.createdAt)?.getTime() ??
+            getIsoDateFallbackMs(rec.paymentDate),
+        };
+      }
+
       const supplier = suppliersById.get(rec.supplierId);
       return {
         kind: 'money_out',
+        subType: 'supplier',
         id: `out-${rec.id}`,
         reference: rec.reference || rec.id,
         amount: rec.amount,
@@ -241,7 +299,7 @@ export function DashboardOverview({
     return [...incoming, ...outgoing]
       .sort((a, b) => b.sortTimestamp - a.sortTimestamp)
       .slice(0, 5);
-  }, [moneyInRecords, moneyOutRecords, clientsById, suppliersById]);
+  }, [moneyInRecords, moneyOutRecords, clientsById, suppliersById, employeesById]);
 
   return (
     <div className="space-y-6">
@@ -340,13 +398,13 @@ export function DashboardOverview({
             </div>
           </div>
 
-          {/* Total Cash / Bank Balance */}
+          {/* Net Cash Balance */}
           <div className="bg-white border border-slate-200 rounded-lg p-5 flex flex-col justify-between">
             <div>
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <p className="text-xs font-medium text-slate-500">
-                    Total Cash / Bank Balance
+                    Net Cash Balance
                   </p>
                   <p
                     className={`mt-2 font-mono text-2xl sm:text-[28px] leading-tight font-semibold tabular-nums ${
@@ -373,11 +431,16 @@ export function DashboardOverview({
             </div>
             <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
               <span className="text-xs text-slate-500">
-                Client receipts minus supplier payouts
+                Receipts minus payouts, expenses &amp; advances
               </span>
-              <span className="font-mono text-xs tabular-nums text-slate-500">
-                {moneyInRecords.length + moneyOutRecords.length} txns
-              </span>
+              <button
+                type="button"
+                onClick={() => onNavigate('expenses')}
+                className="inline-flex items-center gap-1 text-xs font-medium text-[#1e3a8a] hover:text-[#1e40af] cursor-pointer whitespace-nowrap"
+              >
+                Expenses
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
             </div>
           </div>
         </div>
@@ -580,7 +643,8 @@ export function DashboardOverview({
                 Recent Transactions
               </h2>
               <p className="text-xs text-slate-500 mt-0.5">
-                Last 5 cash &amp; bank movements across receipts and payouts
+                Last 5 cash &amp; bank movements across receipts, payouts, and
+                expenses
               </p>
             </div>
             <button
@@ -606,10 +670,10 @@ export function DashboardOverview({
                   No cash or bank transactions yet
                 </p>
                 <p className="text-xs text-slate-500 mt-1">
-                  Client receipts and supplier payouts will appear here in real
-                  time.
+                  Client receipts, supplier payouts, and factory expenses will
+                  appear here in real time.
                 </p>
-                <div className="mt-4 flex items-center justify-center gap-2.5">
+                <div className="mt-4 flex flex-wrap items-center justify-center gap-2.5">
                   <button
                     type="button"
                     onClick={() => onNavigate('clients')}
@@ -624,17 +688,34 @@ export function DashboardOverview({
                   >
                     Pay Supplier
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => onNavigate('expenses')}
+                    className="px-3.5 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-md transition-colors cursor-pointer"
+                  >
+                    Log Expense
+                  </button>
                 </div>
               </div>
             ) : (
               recentTransactions.map((txn) => {
                 const isMoneyIn = txn.kind === 'money_in';
+                const isExpense =
+                  txn.kind === 'money_out' && txn.subType === 'expense';
+                const isAdvance =
+                  txn.kind === 'money_out' && txn.subType === 'advance';
                 const client = isMoneyIn
                   ? clientsById.get(txn.counterpartyId)
                   : undefined;
-                const supplier = !isMoneyIn
-                  ? suppliersById.get(txn.counterpartyId)
-                  : undefined;
+                const supplier =
+                  !isMoneyIn && !isExpense && !isAdvance
+                    ? suppliersById.get(txn.counterpartyId)
+                    : undefined;
+                const isInteractive = isMoneyIn
+                  ? Boolean(client)
+                  : isExpense || isAdvance
+                    ? true
+                    : Boolean(supplier);
 
                 return (
                   <button
@@ -643,11 +724,15 @@ export function DashboardOverview({
                     onClick={() => {
                       if (isMoneyIn && client) {
                         onOpenClientPayments(client);
+                      } else if (isAdvance) {
+                        onNavigate('employees');
+                      } else if (isExpense) {
+                        onNavigate('expenses');
                       } else if (!isMoneyIn && supplier) {
                         onOpenSupplierPayments(supplier);
                       }
                     }}
-                    disabled={isMoneyIn ? !client : !supplier}
+                    disabled={!isInteractive}
                     className="w-full px-5 py-3.5 flex items-center justify-between gap-4 text-left hover:bg-slate-50/70 disabled:cursor-default transition-colors cursor-pointer"
                   >
                     <div className="flex items-center gap-3 min-w-0">
@@ -674,7 +759,13 @@ export function DashboardOverview({
                               isMoneyIn ? 'text-emerald-700' : 'text-red-700'
                             }`}
                           >
-                            {isMoneyIn ? 'Money In' : 'Money Out'}
+                            {isMoneyIn
+                              ? 'Money In'
+                              : isAdvance
+                                ? 'Advance Out'
+                                : isExpense
+                                  ? 'Expense Out'
+                                  : 'Money Out'}
                           </span>{' '}
                           · {txn.paymentMethod} ·{' '}
                           {formatIsoDate(txn.paymentDate)}

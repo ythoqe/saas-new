@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Banknote, Edit2, X } from 'lucide-react';
+import { Banknote, Edit2, Printer, X } from 'lucide-react';
 import type {
   MoneyOutRecord,
   PurchaseRecord,
@@ -29,6 +29,7 @@ interface SupplierLedgerDrawerProps {
   onClose: () => void;
   onEditSupplier: (supplier: SupplierRecord) => void;
   onPaySupplier: (supplier: SupplierRecord) => void;
+  onPrintStatement: (supplier: SupplierRecord) => void;
 }
 
 export function SupplierLedgerDrawer({
@@ -40,6 +41,7 @@ export function SupplierLedgerDrawer({
   onClose,
   onEditSupplier,
   onPaySupplier,
+  onPrintStatement,
 }: SupplierLedgerDrawerProps) {
   const [activeTab, setActiveTab] = useState<SupplierDrawerTab>(initialTab);
 
@@ -85,7 +87,9 @@ export function SupplierLedgerDrawer({
   const moneyOutByLedgerId = useMemo(() => {
     const map = new Map<string, MoneyOutRecord>();
     for (const rec of moneyOutRecords) {
-      map.set(rec.ledgerEntryId, rec);
+      if (rec.ledgerEntryId) {
+        map.set(rec.ledgerEntryId, rec);
+      }
       map.set(rec.id, rec);
     }
     return map;
@@ -219,51 +223,62 @@ export function SupplierLedgerDrawer({
           </div>
         </div>
 
-        {/* Tab Bar */}
+        {/* Tab Bar + Print Statement */}
         <div className="px-6 py-3 border-b border-slate-200 bg-white flex flex-wrap items-center justify-between gap-3 shrink-0">
-          <div
-            role="tablist"
-            aria-label="Supplier financial views"
-            className="inline-flex items-center gap-1 p-1 bg-slate-100 rounded-md"
-          >
+          <div className="flex flex-wrap items-center gap-2">
+            <div
+              role="tablist"
+              aria-label="Supplier financial views"
+              className="inline-flex items-center gap-1 p-1 bg-slate-100 rounded-md"
+            >
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeTab === 'ledger'}
+                onClick={() => setActiveTab('ledger')}
+                className={`px-3 py-1.5 text-xs font-medium rounded transition-colors cursor-pointer whitespace-nowrap ${
+                  activeTab === 'ledger'
+                    ? 'bg-white text-slate-900 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Full Ledger ({supplierEntries.length})
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeTab === 'purchases'}
+                onClick={() => setActiveTab('purchases')}
+                className={`px-3 py-1.5 text-xs font-medium rounded transition-colors cursor-pointer whitespace-nowrap ${
+                  activeTab === 'purchases'
+                    ? 'bg-white text-slate-900 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Purchases ({supplierPurchases.length})
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeTab === 'payments'}
+                onClick={() => setActiveTab('payments')}
+                className={`px-3 py-1.5 text-xs font-medium rounded transition-colors cursor-pointer whitespace-nowrap ${
+                  activeTab === 'payments'
+                    ? 'bg-white text-slate-900 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Payment History ({paymentRows.length})
+              </button>
+            </div>
+
             <button
               type="button"
-              role="tab"
-              aria-selected={activeTab === 'ledger'}
-              onClick={() => setActiveTab('ledger')}
-              className={`px-3 py-1.5 text-xs font-medium rounded transition-colors cursor-pointer whitespace-nowrap ${
-                activeTab === 'ledger'
-                  ? 'bg-white text-slate-900 shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
+              onClick={() => onPrintStatement(supplier)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-[#1e3a8a] bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-md transition-colors cursor-pointer whitespace-nowrap"
             >
-              Full Ledger ({supplierEntries.length})
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeTab === 'purchases'}
-              onClick={() => setActiveTab('purchases')}
-              className={`px-3 py-1.5 text-xs font-medium rounded transition-colors cursor-pointer whitespace-nowrap ${
-                activeTab === 'purchases'
-                  ? 'bg-white text-slate-900 shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Purchases ({supplierPurchases.length})
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeTab === 'payments'}
-              onClick={() => setActiveTab('payments')}
-              className={`px-3 py-1.5 text-xs font-medium rounded transition-colors cursor-pointer whitespace-nowrap ${
-                activeTab === 'payments'
-                  ? 'bg-white text-slate-900 shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Payment History ({paymentRows.length})
+              <Printer className="w-3.5 h-3.5 shrink-0" />
+              Print Statement
             </button>
           </div>
           <p className="text-xs text-slate-500">

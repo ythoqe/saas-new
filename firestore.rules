@@ -36,8 +36,28 @@ service cloud.firestore {
       return (val is int || val is float) && val > 0 && val <= maxVal;
     }
 
+    function isNonNegativeBoundedNumber(val, maxVal) {
+      return (val is int || val is float) && val >= 0 && val <= maxVal;
+    }
+
     function isValidLedgerAmount(val) {
       return (val is int || val is float) && val >= 0 && val <= 1000000000;
+    }
+
+    function isValidExpenseCategory(category) {
+      return category is string
+        && category.size() >= 1
+        && category.size() <= 30
+        && category in [
+          'Salary',
+          'Electricity',
+          'Rent',
+          'Transport',
+          'Maintenance',
+          'Food',
+          'Office',
+          'Other'
+        ];
     }
 
     // Validation Blueprint: Client entity
@@ -187,7 +207,7 @@ service cloud.firestore {
         && data.updatedAt is timestamp;
     }
 
-    // Validation Blueprint: MoneyInRecord entity
+    // Validation Blueprint: MoneyInRecord entity (Client Receipt)
     function isValidMoneyIn(data) {
       return data.keys().hasAll([
           'ownerId',
@@ -219,6 +239,50 @@ service cloud.firestore {
         && data.reference.size() >= 5
         && data.reference.size() <= 80
         && data.reference.matches('^PAY-[a-zA-Z0-9_\\-]+$')
+        && isPositiveBoundedNumber(data.amount, 1000000000)
+        && data.paymentDate is string
+        && data.paymentDate.size() == 10
+        && data.paymentDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && data.paymentMethod is string
+        && data.paymentMethod.size() >= 1
+        && data.paymentMethod.size() <= 30
+        && data.paymentMethod in ['Cash', 'Bank', 'Mobile Banking']
+        && data.note is string
+        && data.note.size() <= 300
+        && data.createdAt is timestamp;
+    }
+
+    // Validation Blueprint: MoneyInRecord (Append-Only Cash Reversal Adjustment)
+    function isValidAdjustmentMoneyIn(data) {
+      return data.keys().hasAll([
+          'ownerId',
+          'source',
+          'reference',
+          'amount',
+          'paymentDate',
+          'paymentMethod',
+          'note',
+          'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId',
+          'source',
+          'reference',
+          'amount',
+          'paymentDate',
+          'paymentMethod',
+          'note',
+          'createdAt'
+        ])
+        && isValidId(data.ownerId)
+        && data.ownerId == request.auth.uid
+        && data.source is string
+        && data.source.size() == 10
+        && data.source == 'adjustment'
+        && data.reference is string
+        && data.reference.size() >= 5
+        && data.reference.size() <= 80
+        && data.reference.matches('^REV-[a-zA-Z0-9_\\-]+$')
         && isPositiveBoundedNumber(data.amount, 1000000000)
         && data.paymentDate is string
         && data.paymentDate.size() == 10
@@ -308,7 +372,7 @@ service cloud.firestore {
         && data.createdAt is timestamp;
     }
 
-    // Validation Blueprint: Purchase entity
+    // Validation Blueprint: Purchase entity (Supports optional status: Pending | Paid)
     function isValidPurchase(data) {
       return data.keys().hasAll([
           'ownerId',
@@ -334,7 +398,9 @@ service cloud.firestore {
           'unit',
           'rate',
           'totalAmount',
-          'createdAt'
+          'status',
+          'createdAt',
+          'updatedAt'
         ])
         && isValidId(data.ownerId)
         && data.ownerId == request.auth.uid
@@ -358,11 +424,13 @@ service cloud.firestore {
         && isPositiveBoundedNumber(data.rate, 10000000)
         && isPositiveBoundedNumber(data.totalAmount, 1000000000)
         && math.abs(data.totalAmount - (data.quantity * data.rate)) <= 0.02
-        && data.createdAt is timestamp;
+        && (!('status' in data) || (data.status is string && data.status.size() >= 4 && data.status.size() <= 10 && data.status in ['Pending', 'Paid']))
+        && data.createdAt is timestamp
+        && (!('updatedAt' in data) || data.updatedAt is timestamp);
     }
 
-    // Validation Blueprint: MoneyOutRecord entity
-    function isValidMoneyOut(data) {
+    // Validation Blueprint: MoneyOutRecord (Supplier Payment Outflow)
+    function isValidSupplierMoneyOut(data) {
       return data.keys().hasAll([
           'ownerId',
           'supplierId',
@@ -406,7 +474,383 @@ service cloud.firestore {
         && data.createdAt is timestamp;
     }
 
-    // Collection: /clients/{clientId}
+    // Validation Blueprint: MoneyOutRecord (Factory Expense Outflow)
+    function isValidExpenseMoneyOut(data) {
+      return data.keys().hasAll([
+          'ownerId',
+          'expenseId',
+          'category',
+          'reference',
+          'amount',
+          'paymentDate',
+          'paymentMethod',
+          'note',
+          'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId',
+          'expenseId',
+          'category',
+          'reference',
+          'amount',
+          'paymentDate',
+          'paymentMethod',
+          'note',
+          'createdAt'
+        ])
+        && isValidId(data.ownerId)
+        && data.ownerId == request.auth.uid
+        && isValidId(data.expenseId)
+        && isValidExpenseCategory(data.category)
+        && data.reference is string
+        && data.reference.size() >= 5
+        && data.reference.size() <= 80
+        && data.reference.matches('^EXP-[a-zA-Z0-9_\\-]+$')
+        && isPositiveBoundedNumber(data.amount, 1000000000)
+        && data.paymentDate is string
+        && data.paymentDate.size() == 10
+        && data.paymentDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && data.paymentMethod is string
+        && data.paymentMethod.size() >= 1
+        && data.paymentMethod.size() <= 20
+        && data.paymentMethod in ['Cash', 'Bank']
+        && data.note is string
+        && data.note.size() <= 300
+        && data.createdAt is timestamp;
+    }
+
+    // Validation Blueprint: MoneyOutRecord (Employee Weekly Advance Outflow)
+    function isValidAdvanceMoneyOut(data) {
+      return data.keys().hasAll([
+          'ownerId',
+          'employeeId',
+          'advanceId',
+          'category',
+          'reference',
+          'amount',
+          'paymentDate',
+          'paymentMethod',
+          'note',
+          'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId',
+          'employeeId',
+          'advanceId',
+          'category',
+          'reference',
+          'amount',
+          'paymentDate',
+          'paymentMethod',
+          'note',
+          'createdAt'
+        ])
+        && isValidId(data.ownerId)
+        && data.ownerId == request.auth.uid
+        && isValidId(data.employeeId)
+        && isValidId(data.advanceId)
+        && data.category is string
+        && data.category.size() == 16
+        && data.category == 'Employee Advance'
+        && data.reference is string
+        && data.reference.size() >= 5
+        && data.reference.size() <= 80
+        && data.reference.matches('^ADV-[a-zA-Z0-9_\\-]+$')
+        && isPositiveBoundedNumber(data.amount, 1000000000)
+        && data.paymentDate is string
+        && data.paymentDate.size() == 10
+        && data.paymentDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && data.paymentMethod is string
+        && data.paymentMethod.size() >= 1
+        && data.paymentMethod.size() <= 20
+        && data.paymentMethod in ['Cash', 'Bank']
+        && data.note is string
+        && data.note.size() <= 300
+        && data.createdAt is timestamp;
+    }
+
+    // Validation Blueprint: MoneyOutRecord (Append-Only Cash Reversal Adjustment)
+    function isValidAdjustmentMoneyOut(data) {
+      return data.keys().hasAll([
+          'ownerId',
+          'source',
+          'reference',
+          'amount',
+          'paymentDate',
+          'paymentMethod',
+          'note',
+          'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId',
+          'source',
+          'reference',
+          'amount',
+          'paymentDate',
+          'paymentMethod',
+          'note',
+          'createdAt'
+        ])
+        && isValidId(data.ownerId)
+        && data.ownerId == request.auth.uid
+        && data.source is string
+        && data.source.size() == 10
+        && data.source == 'adjustment'
+        && data.reference is string
+        && data.reference.size() >= 5
+        && data.reference.size() <= 80
+        && data.reference.matches('^REV-[a-zA-Z0-9_\\-]+$')
+        && isPositiveBoundedNumber(data.amount, 1000000000)
+        && data.paymentDate is string
+        && data.paymentDate.size() == 10
+        && data.paymentDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && data.paymentMethod is string
+        && data.paymentMethod.size() >= 1
+        && data.paymentMethod.size() <= 30
+        && data.paymentMethod in ['Cash', 'Bank', 'Mobile Banking']
+        && data.note is string
+        && data.note.size() <= 300
+        && data.createdAt is timestamp;
+    }
+
+    // Validation Blueprint: Expense entity
+    function isValidExpense(data) {
+      return data.keys().hasAll([
+          'ownerId',
+          'moneyOutId',
+          'reference',
+          'expenseDate',
+          'category',
+          'amount',
+          'paymentMethod',
+          'description',
+          'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId',
+          'moneyOutId',
+          'reference',
+          'expenseDate',
+          'category',
+          'amount',
+          'paymentMethod',
+          'description',
+          'createdAt'
+        ])
+        && isValidId(data.ownerId)
+        && data.ownerId == request.auth.uid
+        && isValidId(data.moneyOutId)
+        && data.reference is string
+        && data.reference.size() >= 5
+        && data.reference.size() <= 80
+        && data.reference.matches('^EXP-[a-zA-Z0-9_\\-]+$')
+        && data.expenseDate is string
+        && data.expenseDate.size() == 10
+        && data.expenseDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && isValidExpenseCategory(data.category)
+        && isPositiveBoundedNumber(data.amount, 1000000000)
+        && data.paymentMethod is string
+        && data.paymentMethod.size() >= 1
+        && data.paymentMethod.size() <= 20
+        && data.paymentMethod in ['Cash', 'Bank']
+        && data.description is string
+        && data.description.size() <= 300
+        && data.createdAt is timestamp;
+    }
+
+    // Validation Blueprint: InventoryItem entity
+    function isValidInventoryItem(data) {
+      return data.keys().hasAll([
+          'ownerId',
+          'itemName',
+          'unit',
+          'minStockLevel',
+          'currentStock',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId',
+          'itemName',
+          'unit',
+          'minStockLevel',
+          'currentStock',
+          'createdAt',
+          'updatedAt'
+        ])
+        && isValidId(data.ownerId)
+        && data.ownerId == request.auth.uid
+        && data.itemName is string
+        && data.itemName.size() >= 1
+        && data.itemName.size() <= 120
+        && data.unit is string
+        && data.unit.size() >= 1
+        && data.unit.size() <= 20
+        && data.unit in ['KG', 'Liter', 'Pcs']
+        && isNonNegativeBoundedNumber(data.minStockLevel, 10000000)
+        && isNonNegativeBoundedNumber(data.currentStock, 10000000)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    // Validation Blueprint: StockMovement entity
+    function isValidStockMovement(data) {
+      return data.keys().hasAll([
+          'ownerId',
+          'inventoryItemId',
+          'itemName',
+          'unit',
+          'type',
+          'quantity',
+          'previousStock',
+          'resultingStock',
+          'movementDate',
+          'reference',
+          'note',
+          'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId',
+          'inventoryItemId',
+          'itemName',
+          'unit',
+          'type',
+          'quantity',
+          'previousStock',
+          'resultingStock',
+          'movementDate',
+          'reference',
+          'note',
+          'createdAt'
+        ])
+        && isValidId(data.ownerId)
+        && data.ownerId == request.auth.uid
+        && isValidId(data.inventoryItemId)
+        && data.itemName is string
+        && data.itemName.size() >= 1
+        && data.itemName.size() <= 120
+        && data.unit is string
+        && data.unit.size() >= 1
+        && data.unit.size() <= 20
+        && data.unit in ['KG', 'Liter', 'Pcs']
+        && data.type is string
+        && data.type.size() >= 1
+        && data.type.size() <= 20
+        && data.type in ['opening', 'in', 'out', 'purchase']
+        && isPositiveBoundedNumber(data.quantity, 10000000)
+        && isNonNegativeBoundedNumber(data.previousStock, 10000000)
+        && isNonNegativeBoundedNumber(data.resultingStock, 10000000)
+        && (data.type != 'opening' || (data.previousStock == 0 && math.abs(data.resultingStock - data.quantity) <= 0.02))
+        && ((data.type != 'in' && data.type != 'purchase') || math.abs(data.resultingStock - (data.previousStock + data.quantity)) <= 0.02)
+        && (data.type != 'out' || math.abs(data.resultingStock - (data.previousStock - data.quantity)) <= 0.02)
+        && data.movementDate is string
+        && data.movementDate.size() == 10
+        && data.movementDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && data.reference is string
+        && data.reference.size() <= 80
+        && data.note is string
+        && data.note.size() <= 300
+        && data.createdAt is timestamp;
+    }
+
+    // Validation Blueprint: Employee entity
+    function isValidEmployee(data) {
+      return data.keys().hasAll([
+          'ownerId',
+          'name',
+          'mobile',
+          'department',
+          'joiningDate',
+          'basicSalary',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId',
+          'name',
+          'mobile',
+          'department',
+          'joiningDate',
+          'basicSalary',
+          'createdAt',
+          'updatedAt'
+        ])
+        && isValidId(data.ownerId)
+        && data.ownerId == request.auth.uid
+        && data.name is string
+        && data.name.size() >= 1
+        && data.name.size() <= 120
+        && data.mobile is string
+        && data.mobile.size() >= 5
+        && data.mobile.size() <= 25
+        && data.mobile.matches('^[+0-9 ()-]+$')
+        && data.department is string
+        && data.department.size() >= 1
+        && data.department.size() <= 60
+        && data.joiningDate is string
+        && data.joiningDate.size() == 10
+        && data.joiningDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && isPositiveBoundedNumber(data.basicSalary, 100000000)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    // Validation Blueprint: EmployeeAdvance entity
+    function isValidEmployeeAdvance(data) {
+      return data.keys().hasAll([
+          'ownerId',
+          'employeeId',
+          'employeeName',
+          'department',
+          'moneyOutId',
+          'reference',
+          'amount',
+          'advanceDate',
+          'paymentMethod',
+          'note',
+          'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId',
+          'employeeId',
+          'employeeName',
+          'department',
+          'moneyOutId',
+          'reference',
+          'amount',
+          'advanceDate',
+          'paymentMethod',
+          'note',
+          'createdAt'
+        ])
+        && isValidId(data.ownerId)
+        && data.ownerId == request.auth.uid
+        && isValidId(data.employeeId)
+        && data.employeeName is string
+        && data.employeeName.size() >= 1
+        && data.employeeName.size() <= 120
+        && data.department is string
+        && data.department.size() >= 1
+        && data.department.size() <= 60
+        && isValidId(data.moneyOutId)
+        && data.reference is string
+        && data.reference.size() >= 5
+        && data.reference.size() <= 80
+        && data.reference.matches('^ADV-[a-zA-Z0-9_\\-]+$')
+        && isPositiveBoundedNumber(data.amount, 1000000000)
+        && data.advanceDate is string
+        && data.advanceDate.size() == 10
+        && data.advanceDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && data.paymentMethod is string
+        && data.paymentMethod.size() >= 1
+        && data.paymentMethod.size() <= 20
+        && data.paymentMethod in ['Cash', 'Bank']
+        && data.note is string
+        && data.note.size() <= 300
+        && data.createdAt is timestamp;
+    }
+
+    // Collection: /clients/{clientId} (Master Data: Edit & Hard Delete Allowed by Owner)
     match /clients/{clientId} {
       allow get: if isVerifiedUser()
         && isValidId(clientId)
@@ -436,10 +880,12 @@ service cloud.firestore {
           'updatedAt'
         ]);
 
-      allow delete: if false;
+      allow delete: if isVerifiedUser()
+        && isValidId(clientId)
+        && isOwner(existing().ownerId);
     }
 
-    // Collection: /client_ledger/{entryId} (Append-Only Client Transaction Log)
+    // Collection: /client_ledger/{entryId} (Append-Only Client Transaction Log — Immutable)
     match /client_ledger/{entryId} {
       allow get: if isVerifiedUser()
         && isValidId(entryId)
@@ -452,14 +898,21 @@ service cloud.firestore {
         && isValidId(entryId)
         && isValidLedgerEntry(incoming())
         && incoming().createdAt == request.time
-        && existsAfter(/databases/$(database)/documents/clients/$(incoming().clientId))
-        && getAfter(/databases/$(database)/documents/clients/$(incoming().clientId)).data.ownerId == request.auth.uid;
+        && (
+          (
+            existsAfter(/databases/$(database)/documents/clients/$(incoming().clientId))
+            && getAfter(/databases/$(database)/documents/clients/$(incoming().clientId)).data.ownerId == request.auth.uid
+          ) || (
+            incoming().txn_type == 'adjustment'
+            && !existsAfter(/databases/$(database)/documents/clients/$(incoming().clientId))
+          )
+        );
 
       allow update: if false;
       allow delete: if false;
     }
 
-    // Collection: /orders/{orderId}
+    // Collection: /orders/{orderId} (Editable & Deletable ONLY while not Delivered; Delivered is Terminal)
     match /orders/{orderId} {
       allow get: if isVerifiedUser()
         && isValidId(orderId)
@@ -484,19 +937,38 @@ service cloud.firestore {
         && existing().status != 'Delivered'
         && incoming().ownerId == existing().ownerId
         && incoming().clientId == existing().clientId
-        && incoming().orderDate == existing().orderDate
-        && incoming().fabricType == existing().fabricType
-        && incoming().greyFabricThan == existing().greyFabricThan
-        && incoming().greyFabricGaj == existing().greyFabricGaj
-        && incoming().rate == existing().rate
         && incoming().createdAt == existing().createdAt
         && incoming().updatedAt == request.time
         && (
+          // Action 1: Update production stage while in progress
           (
             incoming().status != 'Delivered'
+            && incoming().orderDate == existing().orderDate
+            && incoming().fabricType == existing().fabricType
+            && incoming().greyFabricThan == existing().greyFabricThan
+            && incoming().greyFabricGaj == existing().greyFabricGaj
+            && incoming().rate == existing().rate
             && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt'])
           ) || (
+            // Action 2: Edit order details while Processing
+            existing().status == 'Processing'
+            && incoming().status == 'Processing'
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'orderDate',
+              'fabricType',
+              'greyFabricThan',
+              'greyFabricGaj',
+              'rate',
+              'updatedAt'
+            ])
+          ) || (
+            // Action 3: Complete & Deliver with atomic client_ledger invoice creation
             incoming().status == 'Delivered'
+            && incoming().orderDate == existing().orderDate
+            && incoming().fabricType == existing().fabricType
+            && incoming().greyFabricThan == existing().greyFabricThan
+            && incoming().greyFabricGaj == existing().greyFabricGaj
+            && incoming().rate == existing().rate
             && incoming().deliveredAt == request.time
             && math.abs(incoming().finalBillAmount - (incoming().finalGaj * existing().rate)) <= 0.02
             && incoming().diff(existing()).affectedKeys().hasOnly([
@@ -516,10 +988,14 @@ service cloud.firestore {
           )
         );
 
-      allow delete: if false;
+      // Delete allowed ONLY while status is Processing (never once Delivered)
+      allow delete: if isVerifiedUser()
+        && isValidId(orderId)
+        && isOwner(existing().ownerId)
+        && existing().status == 'Processing';
     }
 
-    // Collection: /money_in/{paymentId} (Append-Only Client Payment Inflow)
+    // Collection: /money_in/{paymentId} (Append-Only Client Receipt OR Cash Reversal Inflow — Immutable)
     match /money_in/{paymentId} {
       allow get: if isVerifiedUser()
         && isValidId(paymentId)
@@ -530,25 +1006,33 @@ service cloud.firestore {
 
       allow create: if isVerifiedUser()
         && isValidId(paymentId)
-        && isValidMoneyIn(incoming())
-        && incoming().ledgerEntryId == paymentId
-        && incoming().reference == paymentId
-        && incoming().createdAt == request.time
-        && exists(/databases/$(database)/documents/clients/$(incoming().clientId))
-        && get(/databases/$(database)/documents/clients/$(incoming().clientId)).data.ownerId == request.auth.uid
-        && existsAfter(/databases/$(database)/documents/client_ledger/$(paymentId))
-        && getAfter(/databases/$(database)/documents/client_ledger/$(paymentId)).data.ownerId == request.auth.uid
-        && getAfter(/databases/$(database)/documents/client_ledger/$(paymentId)).data.clientId == incoming().clientId
-        && getAfter(/databases/$(database)/documents/client_ledger/$(paymentId)).data.txn_type == 'payment'
-        && getAfter(/databases/$(database)/documents/client_ledger/$(paymentId)).data.debit == 0
-        && getAfter(/databases/$(database)/documents/client_ledger/$(paymentId)).data.credit == incoming().amount
-        && getAfter(/databases/$(database)/documents/client_ledger/$(paymentId)).data.reference == paymentId;
+        && (
+          (
+            isValidMoneyIn(incoming())
+            && incoming().ledgerEntryId == paymentId
+            && incoming().reference == paymentId
+            && incoming().createdAt == request.time
+            && exists(/databases/$(database)/documents/clients/$(incoming().clientId))
+            && get(/databases/$(database)/documents/clients/$(incoming().clientId)).data.ownerId == request.auth.uid
+            && existsAfter(/databases/$(database)/documents/client_ledger/$(paymentId))
+            && getAfter(/databases/$(database)/documents/client_ledger/$(paymentId)).data.ownerId == request.auth.uid
+            && getAfter(/databases/$(database)/documents/client_ledger/$(paymentId)).data.clientId == incoming().clientId
+            && getAfter(/databases/$(database)/documents/client_ledger/$(paymentId)).data.txn_type == 'payment'
+            && getAfter(/databases/$(database)/documents/client_ledger/$(paymentId)).data.debit == 0
+            && getAfter(/databases/$(database)/documents/client_ledger/$(paymentId)).data.credit == incoming().amount
+            && getAfter(/databases/$(database)/documents/client_ledger/$(paymentId)).data.reference == paymentId
+          ) || (
+            isValidAdjustmentMoneyIn(incoming())
+            && incoming().reference == paymentId
+            && incoming().createdAt == request.time
+          )
+        );
 
       allow update: if false;
       allow delete: if false;
     }
 
-    // Collection: /suppliers/{supplierId}
+    // Collection: /suppliers/{supplierId} (Master Data: Edit & Hard Delete Allowed by Owner)
     match /suppliers/{supplierId} {
       allow get: if isVerifiedUser()
         && isValidId(supplierId)
@@ -577,10 +1061,12 @@ service cloud.firestore {
           'updatedAt'
         ]);
 
-      allow delete: if false;
+      allow delete: if isVerifiedUser()
+        && isValidId(supplierId)
+        && isOwner(existing().ownerId);
     }
 
-    // Collection: /supplier_ledger/{entryId} (Append-Only Supplier Payable Log)
+    // Collection: /supplier_ledger/{entryId} (Append-Only Supplier Payable Log — Immutable)
     match /supplier_ledger/{entryId} {
       allow get: if isVerifiedUser()
         && isValidId(entryId)
@@ -589,20 +1075,25 @@ service cloud.firestore {
       allow list: if isVerifiedUser()
         && existing().ownerId == request.auth.uid;
 
-      // Supports atomic onboarding (supplier + opening payable) as well as purchases & payments
       allow create: if isVerifiedUser()
         && isValidId(entryId)
         && isValidSupplierLedgerEntry(incoming())
         && incoming().createdAt == request.time
-        && existsAfter(/databases/$(database)/documents/suppliers/$(incoming().supplierId))
-        && getAfter(/databases/$(database)/documents/suppliers/$(incoming().supplierId)).data.ownerId == request.auth.uid;
+        && (
+          (
+            existsAfter(/databases/$(database)/documents/suppliers/$(incoming().supplierId))
+            && getAfter(/databases/$(database)/documents/suppliers/$(incoming().supplierId)).data.ownerId == request.auth.uid
+          ) || (
+            incoming().txn_type == 'adjustment'
+            && !existsAfter(/databases/$(database)/documents/suppliers/$(incoming().supplierId))
+          )
+        );
 
-      // Append-only payable ledger: immutable once recorded
       allow update: if false;
       allow delete: if false;
     }
 
-    // Collection: /purchases/{purchaseId} (Append-Only Inventory Purchases Paired Atomically with supplier_ledger)
+    // Collection: /purchases/{purchaseId} (Editable/Deletable ONLY while Pending; Paid is Terminal)
     match /purchases/{purchaseId} {
       allow get: if isVerifiedUser()
         && isValidId(purchaseId)
@@ -611,13 +1102,13 @@ service cloud.firestore {
       allow list: if isVerifiedUser()
         && existing().ownerId == request.auth.uid;
 
-      // Create: Must atomically post credit to supplier_ledger with txn_type == 'purchase' and matching amount
       allow create: if isVerifiedUser()
         && isValidId(purchaseId)
         && isValidPurchase(incoming())
         && incoming().ledgerEntryId == purchaseId
         && incoming().reference == purchaseId
         && incoming().createdAt == request.time
+        && (!('updatedAt' in incoming()) || incoming().updatedAt == request.time)
         && exists(/databases/$(database)/documents/suppliers/$(incoming().supplierId))
         && get(/databases/$(database)/documents/suppliers/$(incoming().supplierId)).data.ownerId == request.auth.uid
         && existsAfter(/databases/$(database)/documents/supplier_ledger/$(purchaseId))
@@ -628,11 +1119,54 @@ service cloud.firestore {
         && getAfter(/databases/$(database)/documents/supplier_ledger/$(purchaseId)).data.debit == 0
         && getAfter(/databases/$(database)/documents/supplier_ledger/$(purchaseId)).data.reference == purchaseId;
 
-      allow update: if false;
-      allow delete: if false;
+      allow update: if isVerifiedUser()
+        && isValidId(purchaseId)
+        && isValidPurchase(incoming())
+        && isOwner(existing().ownerId)
+        && (!('status' in existing()) || existing().status == 'Pending')
+        && incoming().ownerId == existing().ownerId
+        && incoming().supplierId == existing().supplierId
+        && incoming().ledgerEntryId == existing().ledgerEntryId
+        && incoming().reference == existing().reference
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          // Action 1: Edit pending purchase details
+          (
+            (!('status' in incoming()) || incoming().status == 'Pending')
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'purchaseDate',
+              'itemName',
+              'quantity',
+              'unit',
+              'rate',
+              'totalAmount',
+              'status',
+              'updatedAt'
+            ])
+          ) || (
+            // Action 2: Mark pending purchase as Paid (terminal lock)
+            incoming().status == 'Paid'
+            && incoming().purchaseDate == existing().purchaseDate
+            && incoming().itemName == existing().itemName
+            && incoming().quantity == existing().quantity
+            && incoming().unit == existing().unit
+            && incoming().rate == existing().rate
+            && incoming().totalAmount == existing().totalAmount
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'status',
+              'updatedAt'
+            ])
+          )
+        );
+
+      allow delete: if isVerifiedUser()
+        && isValidId(purchaseId)
+        && isOwner(existing().ownerId)
+        && (!('status' in existing()) || existing().status == 'Pending');
     }
 
-    // Collection: /money_out/{paymentId} (Append-Only Supplier Payment Outflow Paired Atomically with supplier_ledger)
+    // Collection: /money_out/{paymentId} (Append-Only Cash/Bank Outflow OR Cash Reversal — Immutable)
     match /money_out/{paymentId} {
       allow get: if isVerifiedUser()
         && isValidId(paymentId)
@@ -641,24 +1175,222 @@ service cloud.firestore {
       allow list: if isVerifiedUser()
         && existing().ownerId == request.auth.uid;
 
-      // Create: Must atomically post debit to supplier_ledger with txn_type == 'payment' and matching amount
       allow create: if isVerifiedUser()
         && isValidId(paymentId)
-        && isValidMoneyOut(incoming())
-        && incoming().ledgerEntryId == paymentId
-        && incoming().reference == paymentId
-        && incoming().createdAt == request.time
-        && exists(/databases/$(database)/documents/suppliers/$(incoming().supplierId))
-        && get(/databases/$(database)/documents/suppliers/$(incoming().supplierId)).data.ownerId == request.auth.uid
-        && existsAfter(/databases/$(database)/documents/supplier_ledger/$(paymentId))
-        && getAfter(/databases/$(database)/documents/supplier_ledger/$(paymentId)).data.ownerId == request.auth.uid
-        && getAfter(/databases/$(database)/documents/supplier_ledger/$(paymentId)).data.supplierId == incoming().supplierId
-        && getAfter(/databases/$(database)/documents/supplier_ledger/$(paymentId)).data.txn_type == 'payment'
-        && getAfter(/databases/$(database)/documents/supplier_ledger/$(paymentId)).data.debit == incoming().amount
-        && getAfter(/databases/$(database)/documents/supplier_ledger/$(paymentId)).data.credit == 0
-        && getAfter(/databases/$(database)/documents/supplier_ledger/$(paymentId)).data.reference == paymentId;
+        && (
+          (
+            isValidSupplierMoneyOut(incoming())
+            && incoming().ledgerEntryId == paymentId
+            && incoming().reference == paymentId
+            && incoming().createdAt == request.time
+            && exists(/databases/$(database)/documents/suppliers/$(incoming().supplierId))
+            && get(/databases/$(database)/documents/suppliers/$(incoming().supplierId)).data.ownerId == request.auth.uid
+            && existsAfter(/databases/$(database)/documents/supplier_ledger/$(paymentId))
+            && getAfter(/databases/$(database)/documents/supplier_ledger/$(paymentId)).data.ownerId == request.auth.uid
+            && getAfter(/databases/$(database)/documents/supplier_ledger/$(paymentId)).data.supplierId == incoming().supplierId
+            && getAfter(/databases/$(database)/documents/supplier_ledger/$(paymentId)).data.txn_type == 'payment'
+            && getAfter(/databases/$(database)/documents/supplier_ledger/$(paymentId)).data.debit == incoming().amount
+            && getAfter(/databases/$(database)/documents/supplier_ledger/$(paymentId)).data.credit == 0
+            && getAfter(/databases/$(database)/documents/supplier_ledger/$(paymentId)).data.reference == paymentId
+          ) || (
+            isValidExpenseMoneyOut(incoming())
+            && incoming().expenseId == paymentId
+            && incoming().reference == paymentId
+            && incoming().createdAt == request.time
+            && existsAfter(/databases/$(database)/documents/expenses/$(paymentId))
+            && getAfter(/databases/$(database)/documents/expenses/$(paymentId)).data.ownerId == request.auth.uid
+            && getAfter(/databases/$(database)/documents/expenses/$(paymentId)).data.moneyOutId == paymentId
+            && getAfter(/databases/$(database)/documents/expenses/$(paymentId)).data.reference == paymentId
+            && getAfter(/databases/$(database)/documents/expenses/$(paymentId)).data.category == incoming().category
+            && getAfter(/databases/$(database)/documents/expenses/$(paymentId)).data.amount == incoming().amount
+            && getAfter(/databases/$(database)/documents/expenses/$(paymentId)).data.expenseDate == incoming().paymentDate
+            && getAfter(/databases/$(database)/documents/expenses/$(paymentId)).data.paymentMethod == incoming().paymentMethod
+            && getAfter(/databases/$(database)/documents/expenses/$(paymentId)).data.description == incoming().note
+          ) || (
+            isValidAdvanceMoneyOut(incoming())
+            && incoming().advanceId == paymentId
+            && incoming().reference == paymentId
+            && incoming().createdAt == request.time
+            && exists(/databases/$(database)/documents/employees/$(incoming().employeeId))
+            && get(/databases/$(database)/documents/employees/$(incoming().employeeId)).data.ownerId == request.auth.uid
+            && existsAfter(/databases/$(database)/documents/employee_advances/$(paymentId))
+            && getAfter(/databases/$(database)/documents/employee_advances/$(paymentId)).data.ownerId == request.auth.uid
+            && getAfter(/databases/$(database)/documents/employee_advances/$(paymentId)).data.employeeId == incoming().employeeId
+            && getAfter(/databases/$(database)/documents/employee_advances/$(paymentId)).data.moneyOutId == paymentId
+            && getAfter(/databases/$(database)/documents/employee_advances/$(paymentId)).data.reference == paymentId
+            && getAfter(/databases/$(database)/documents/employee_advances/$(paymentId)).data.amount == incoming().amount
+            && getAfter(/databases/$(database)/documents/employee_advances/$(paymentId)).data.advanceDate == incoming().paymentDate
+            && getAfter(/databases/$(database)/documents/employee_advances/$(paymentId)).data.paymentMethod == incoming().paymentMethod
+          ) || (
+            isValidAdjustmentMoneyOut(incoming())
+            && incoming().reference == paymentId
+            && incoming().createdAt == request.time
+          )
+        );
 
-      // Append-only cash/bank outflow audit log
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    // Collection: /expenses/{expenseId} (Append-Only Factory Operating Expenses Paired Atomically with money_out)
+    match /expenses/{expenseId} {
+      allow get: if isVerifiedUser()
+        && isValidId(expenseId)
+        && isOwner(existing().ownerId);
+
+      allow list: if isVerifiedUser()
+        && existing().ownerId == request.auth.uid;
+
+      allow create: if isVerifiedUser()
+        && isValidId(expenseId)
+        && isValidExpense(incoming())
+        && incoming().moneyOutId == expenseId
+        && incoming().reference == expenseId
+        && incoming().createdAt == request.time
+        && existsAfter(/databases/$(database)/documents/money_out/$(expenseId))
+        && getAfter(/databases/$(database)/documents/money_out/$(expenseId)).data.ownerId == request.auth.uid
+        && getAfter(/databases/$(database)/documents/money_out/$(expenseId)).data.expenseId == expenseId
+        && getAfter(/databases/$(database)/documents/money_out/$(expenseId)).data.reference == expenseId
+        && getAfter(/databases/$(database)/documents/money_out/$(expenseId)).data.category == incoming().category
+        && getAfter(/databases/$(database)/documents/money_out/$(expenseId)).data.amount == incoming().amount
+        && getAfter(/databases/$(database)/documents/money_out/$(expenseId)).data.paymentDate == incoming().expenseDate
+        && getAfter(/databases/$(database)/documents/money_out/$(expenseId)).data.paymentMethod == incoming().paymentMethod
+        && getAfter(/databases/$(database)/documents/money_out/$(expenseId)).data.note == incoming().description;
+
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    // Collection: /inventory/{itemId} (Master Data: Edit & Hard Delete Allowed by Owner)
+    match /inventory/{itemId} {
+      allow get: if isVerifiedUser()
+        && isValidId(itemId)
+        && isOwner(existing().ownerId);
+
+      allow list: if isVerifiedUser()
+        && existing().ownerId == request.auth.uid;
+
+      allow create: if isVerifiedUser()
+        && isValidId(itemId)
+        && isValidInventoryItem(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isVerifiedUser()
+        && isValidId(itemId)
+        && isValidInventoryItem(incoming())
+        && isOwner(existing().ownerId)
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          // Action 1: Stock In / Stock Out / Purchase auto-restock
+          (
+            incoming().itemName == existing().itemName
+            && incoming().unit == existing().unit
+            && incoming().diff(existing()).affectedKeys().hasOnly(['currentStock', 'updatedAt'])
+          ) || (
+            // Action 2: Master Data Edit (name, unit, minimum stock alert level)
+            incoming().currentStock == existing().currentStock
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'itemName',
+              'unit',
+              'minStockLevel',
+              'updatedAt'
+            ])
+          )
+        );
+
+      allow delete: if isVerifiedUser()
+        && isValidId(itemId)
+        && isOwner(existing().ownerId);
+    }
+
+    // Collection: /stock_movements/{movementId} (Append-Only Inventory Stock Movement Audit Log)
+    match /stock_movements/{movementId} {
+      allow get: if isVerifiedUser()
+        && isValidId(movementId)
+        && isOwner(existing().ownerId);
+
+      allow list: if isVerifiedUser()
+        && existing().ownerId == request.auth.uid;
+
+      allow create: if isVerifiedUser()
+        && isValidId(movementId)
+        && isValidStockMovement(incoming())
+        && incoming().createdAt == request.time
+        && existsAfter(/databases/$(database)/documents/inventory/$(incoming().inventoryItemId))
+        && getAfter(/databases/$(database)/documents/inventory/$(incoming().inventoryItemId)).data.ownerId == request.auth.uid
+        && getAfter(/databases/$(database)/documents/inventory/$(incoming().inventoryItemId)).data.unit == incoming().unit
+        && math.abs(getAfter(/databases/$(database)/documents/inventory/$(incoming().inventoryItemId)).data.currentStock - incoming().resultingStock) <= 0.02;
+
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    // Collection: /employees/{employeeId} (Master Data: Edit & Hard Delete Allowed by Owner)
+    match /employees/{employeeId} {
+      allow get: if isVerifiedUser()
+        && isValidId(employeeId)
+        && isOwner(existing().ownerId);
+
+      allow list: if isVerifiedUser()
+        && existing().ownerId == request.auth.uid;
+
+      allow create: if isVerifiedUser()
+        && isValidId(employeeId)
+        && isValidEmployee(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isVerifiedUser()
+        && isValidId(employeeId)
+        && isValidEmployee(incoming())
+        && isOwner(existing().ownerId)
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'name',
+          'mobile',
+          'department',
+          'joiningDate',
+          'basicSalary',
+          'updatedAt'
+        ]);
+
+      allow delete: if isVerifiedUser()
+        && isValidId(employeeId)
+        && isOwner(existing().ownerId);
+    }
+
+    // Collection: /employee_advances/{advanceId} (Append-Only Weekly Advances Paired Atomically with money_out)
+    match /employee_advances/{advanceId} {
+      allow get: if isVerifiedUser()
+        && isValidId(advanceId)
+        && isOwner(existing().ownerId);
+
+      allow list: if isVerifiedUser()
+        && existing().ownerId == request.auth.uid;
+
+      allow create: if isVerifiedUser()
+        && isValidId(advanceId)
+        && isValidEmployeeAdvance(incoming())
+        && incoming().moneyOutId == advanceId
+        && incoming().reference == advanceId
+        && incoming().createdAt == request.time
+        && exists(/databases/$(database)/documents/employees/$(incoming().employeeId))
+        && get(/databases/$(database)/documents/employees/$(incoming().employeeId)).data.ownerId == request.auth.uid
+        && existsAfter(/databases/$(database)/documents/money_out/$(advanceId))
+        && getAfter(/databases/$(database)/documents/money_out/$(advanceId)).data.ownerId == request.auth.uid
+        && getAfter(/databases/$(database)/documents/money_out/$(advanceId)).data.employeeId == incoming().employeeId
+        && getAfter(/databases/$(database)/documents/money_out/$(advanceId)).data.advanceId == advanceId
+        && getAfter(/databases/$(database)/documents/money_out/$(advanceId)).data.category == 'Employee Advance'
+        && getAfter(/databases/$(database)/documents/money_out/$(advanceId)).data.reference == advanceId
+        && getAfter(/databases/$(database)/documents/money_out/$(advanceId)).data.amount == incoming().amount
+        && getAfter(/databases/$(database)/documents/money_out/$(advanceId)).data.paymentDate == incoming().advanceDate
+        && getAfter(/databases/$(database)/documents/money_out/$(advanceId)).data.paymentMethod == incoming().paymentMethod;
+
       allow update: if false;
       allow delete: if false;
     }

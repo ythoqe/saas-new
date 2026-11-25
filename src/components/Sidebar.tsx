@@ -1,13 +1,16 @@
 import {
   BookOpen,
+  Boxes,
   ClipboardList,
   LayoutDashboard,
   Layers,
   LogOut,
   Package,
   PlusCircle,
+  Receipt,
   ShoppingCart,
   Truck,
+  UserCheck,
   Users,
   X,
 } from 'lucide-react';
@@ -23,6 +26,10 @@ interface SidebarProps {
   orderCount: number;
   supplierCount: number;
   purchaseCount: number;
+  inventoryCount: number;
+  lowStockCount: number;
+  expenseCount: number;
+  employeeCount: number;
   ledgerCount: number;
   mobileOpen: boolean;
   onCloseMobile: () => void;
@@ -37,6 +44,10 @@ export function Sidebar({
   orderCount,
   supplierCount,
   purchaseCount,
+  inventoryCount,
+  lowStockCount,
+  expenseCount,
+  employeeCount,
   ledgerCount,
   mobileOpen,
   onCloseMobile,
@@ -48,6 +59,7 @@ export function Sidebar({
       label: string;
       icon: typeof Users;
       count?: number;
+      alertCount?: number;
     }[];
   }[] = [
     {
@@ -101,6 +113,30 @@ export function Sidebar({
           id: 'new-purchase',
           label: 'New Purchase',
           icon: ShoppingCart,
+        },
+        {
+          id: 'inventory',
+          label: 'Inventory',
+          icon: Boxes,
+          count: inventoryCount,
+          alertCount: lowStockCount,
+        },
+      ],
+    },
+    {
+      heading: 'Staff & Factory Costs',
+      items: [
+        {
+          id: 'employees',
+          label: 'Employees',
+          icon: UserCheck,
+          count: employeeCount,
+        },
+        {
+          id: 'expenses',
+          label: 'Expenses',
+          icon: Receipt,
+          count: expenseCount,
         },
       ],
     },
@@ -173,15 +209,25 @@ export function Sidebar({
                     />
                     <span className="truncate">{item.label}</span>
                   </span>
-                  {typeof item.count === 'number' && (
-                    <span
-                      className={`font-mono text-xs tabular-nums ${
-                        isActive ? 'text-blue-100' : 'text-slate-400'
-                      }`}
-                    >
-                      {item.count}
-                    </span>
-                  )}
+                  <span className="flex items-center gap-2 shrink-0">
+                    {typeof item.alertCount === 'number' && item.alertCount > 0 && (
+                      <span
+                        title={`${item.alertCount} low stock alert(s)`}
+                        className="px-1.5 py-0.5 rounded bg-red-600 text-[10px] font-mono font-semibold text-white tabular-nums leading-none"
+                      >
+                        {item.alertCount} low
+                      </span>
+                    )}
+                    {typeof item.count === 'number' && (
+                      <span
+                        className={`font-mono text-xs tabular-nums ${
+                          isActive ? 'text-blue-100' : 'text-slate-400'
+                        }`}
+                      >
+                        {item.count}
+                      </span>
+                    )}
+                  </span>
                 </button>
               );
             })}
