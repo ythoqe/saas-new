@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
-import { Banknote, Edit2, Plus, Printer, X } from 'lucide-react';
+import { Banknote, Edit2, Plus, Printer, RotateCcw, Trash2, X } from 'lucide-react';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import {
   LEDGER_VALIDATION,
@@ -30,9 +30,12 @@ interface ClientLedgerDrawerProps {
   initialTab?: ClientDrawerTab;
   onClose: () => void;
   onEditClient: (client: ClientRecord) => void;
+  onDeleteClient: (client: ClientRecord) => void;
   onReceivePayment: (client: ClientRecord) => void;
   onPrintInvoiceEntry: (entry: ClientLedgerEntry) => void;
   onPrintStatement: (client: ClientRecord) => void;
+  onCorrectLedgerEntry: (entry: ClientLedgerEntry) => void;
+  onCorrectMoneyIn: (record: MoneyInRecord) => void;
   onSuccess: (message: string) => void;
 }
 
@@ -44,9 +47,12 @@ export function ClientLedgerDrawer({
   initialTab = 'ledger',
   onClose,
   onEditClient,
+  onDeleteClient,
   onReceivePayment,
   onPrintInvoiceEntry,
   onPrintStatement,
+  onCorrectLedgerEntry,
+  onCorrectMoneyIn,
   onSuccess,
 }: ClientLedgerDrawerProps) {
   const [activeTab, setActiveTab] = useState<ClientDrawerTab>(initialTab);
@@ -105,6 +111,8 @@ export function ClientLedgerDrawer({
         const moneyIn = moneyInByLedgerId.get(entry.id) ?? null;
         return {
           id: entry.id,
+          entry,
+          moneyIn,
           reference: entry.reference || entry.id,
           amount: entry.credit,
           paymentDate: moneyIn?.paymentDate ?? null,
@@ -246,6 +254,14 @@ export function ClientLedgerDrawer({
             >
               <Edit2 className="w-3.5 h-3.5" />
               Edit
+            </button>
+            <button
+              type="button"
+              onClick={() => onDeleteClient(client)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-700 bg-red-50 border border-red-200 hover:bg-red-100 rounded-md transition-colors cursor-pointer whitespace-nowrap"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              Delete
             </button>
             <button
               type="button"
@@ -551,7 +567,7 @@ export function ClientLedgerDrawer({
                           <th className="py-2.5 px-4 text-right">Debit</th>
                           <th className="py-2.5 px-4 text-right">Credit</th>
                           <th className="py-2.5 px-4 text-right">Balance</th>
-                          <th className="py-2.5 px-4 text-right">Print</th>
+                          <th className="py-2.5 px-4 text-right">Actions</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-200 text-sm">
@@ -610,18 +626,26 @@ export function ClientLedgerDrawer({
                               </span>
                             </td>
                             <td className="py-3 px-4 align-top text-right whitespace-nowrap">
-                              {entry.txn_type === 'invoice' ? (
+                              <div className="inline-flex items-center justify-end gap-1.5">
+                                {entry.txn_type === 'invoice' ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => onPrintInvoiceEntry(entry)}
+                                    className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-[#1e3a8a] bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded transition-colors cursor-pointer whitespace-nowrap"
+                                  >
+                                    <Printer className="w-3.5 h-3.5 shrink-0" />
+                                    Print Invoice
+                                  </button>
+                                ) : null}
                                 <button
                                   type="button"
-                                  onClick={() => onPrintInvoiceEntry(entry)}
-                                  className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-[#1e3a8a] bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded transition-colors cursor-pointer whitespace-nowrap"
+                                  onClick={() => onCorrectLedgerEntry(entry)}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded transition-colors cursor-pointer whitespace-nowrap"
                                 >
-                                  <Printer className="w-3.5 h-3.5 shrink-0" />
-                                  Print Invoice
+                                  <RotateCcw className="w-3.5 h-3.5 shrink-0" />
+                                  Correct / Adjust
                                 </button>
-                              ) : (
-                                <span className="text-xs text-slate-300">—</span>
-                              )}
+                              </div>
                             </td>
                           </tr>
                         ))}
@@ -663,6 +687,7 @@ export function ClientLedgerDrawer({
                           <th className="py-2.5 px-4">Method</th>
                           <th className="py-2.5 px-4">Reference Note</th>
                           <th className="py-2.5 px-4 text-right">Amount Paid</th>
+                          <th className="py-2.5 px-4 text-right">Action</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-200 text-sm">
@@ -687,6 +712,22 @@ export function ClientLedgerDrawer({
                             </td>
                             <td className="py-3 px-4 text-right font-mono text-xs font-semibold tabular-nums text-emerald-700 whitespace-nowrap">
                               {formatCurrency(payment.amount)}
+                            </td>
+                            <td className="py-3 px-4 text-right whitespace-nowrap">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (payment.moneyIn) {
+                                    onCorrectMoneyIn(payment.moneyIn);
+                                  } else {
+                                    onCorrectLedgerEntry(payment.entry);
+                                  }
+                                }}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded transition-colors cursor-pointer whitespace-nowrap"
+                              >
+                                <RotateCcw className="w-3.5 h-3.5 shrink-0" />
+                                Correct / Adjust
+                              </button>
                             </td>
                           </tr>
                         ))}

@@ -1,16 +1,27 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { collection, doc, serverTimestamp, setDoc } from 'firebase/firestore';
+import {
+  collection,
+  doc,
+  serverTimestamp,
+  setDoc,
+  updateDoc,
+} from 'firebase/firestore';
 import {
   Banknote,
   Building2,
   CalendarDays,
+  Check,
+  Edit2,
   HandCoins,
   History,
   Plus,
+  RotateCcw,
   Search,
+  Trash2,
   UserCheck,
   UserRound,
   Wallet,
+  X,
 } from 'lucide-react';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import {
@@ -19,6 +30,7 @@ import {
   type EmployeeAdvanceRecord,
   type EmployeeDepartment,
   type EmployeeRecord,
+  type MoneyOutRecord,
 } from '../types/mill';
 import {
   formatCurrency,
@@ -32,11 +44,15 @@ interface EmployeesViewProps {
   ownerId: string;
   employees: EmployeeRecord[];
   advances: EmployeeAdvanceRecord[];
+  moneyOutRecords: MoneyOutRecord[];
   isLoading: boolean;
   focusFormSignal: number;
   onEmployeeCreated: (employeeName: string, department: string) => void;
+  onEmployeeUpdated: (message: string) => void;
+  onDeleteEmployee: (employee: EmployeeRecord) => void;
   onGiveAdvance: (employee: EmployeeRecord) => void;
   onOpenProfile: (employee: EmployeeRecord) => void;
+  onCorrectMoneyOut: (record: MoneyOutRecord) => void;
 }
 
 const DEPARTMENT_BADGE_CLASSES: Record<string, string> = {
@@ -68,11 +84,15 @@ export function EmployeesView({
   ownerId,
   employees,
   advances,
+  moneyOutRecords,
   isLoading,
   focusFormSignal,
   onEmployeeCreated,
+  onEmployeeUpdated,
+  onDeleteEmployee,
   onGiveAdvance,
   onOpenProfile,
+  onCorrectMoneyOut,
 }: EmployeesViewProps) {
   const todayIso = getTodayIsoDate();
   const currentYearMonth = todayIso.slice(0, 7);
@@ -81,7 +101,9 @@ export function EmployeesView({
     [todayIso]
   );
 
-  // Add Employee form state
+  // Add / Edit Employee form state
+  const [editingEmployee, setEditingEmployee] =
+    useState<EmployeeRecord | null>(null);
   const [name, setName] = useState('');
   const [mobile, setMobile] = useState('');
   const [departmentPreset, setDepartmentPreset] =
@@ -102,6 +124,43 @@ export function EmployeesView({
   const [advancePeriod, setAdvancePeriod] = useState<'month' | 'all'>('month');
 
   const nameInputRef = useRef<HTMLInputElement | null>(null);
+
+  const startEditEmployee = (emp: EmployeeRecord) => {
+    setEditingEmployee(emp);
+    setName(emp.name);
+    setMobile(emp.mobile);
+    const isPreset = (EMPLOYEE_DEPARTMENTS as readonly string[]).includes(
+      emp.department
+    );
+    if (isPreset && emp.department !== 'Other') {
+      setDepartmentPreset(emp.department as EmployeeDepartment);
+      setCustomDepartment('');
+    } else {
+      setDepartmentPreset('Other');
+      setCustomDepartment(emp.department);
+    }
+    setJoiningDate(emp.joiningDate);
+    setBasicSalaryInput(String(emp.basicSalary));
+    setFormError(null);
+    if (nameInputRef.current) {
+      nameInputRef.current.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center',
+      });
+      nameInputRef.current.focus();
+    }
+  };
+
+  const cancelEditEmployee = () => {
+    setEditingEmployee(null);
+    setName('');
+    setMobile('');
+    setDepartmentPreset('Dyeing');
+    setCustomDepartment('');
+    setJoiningDate(getTodayIsoDate());
+    setBasicSalaryInput('');
+    setFormError(null);
+  };
 
   useEffect(() => {
     if (focusFormSignal > 0 && nameInputRef.current) {
@@ -289,13 +348,38 @@ export function EmployeesView({
       return;
     }
 
-    const rawAutoId = doc(collection(db, 'employees')).id
-      .slice(0, 8)
-      .toUpperCase();
-    const employeeId = `EMP-${rawAutoId}`;
-
     setIsSubmitting(true);
     try {
+      if (editingEmployee) {
+        const empRef = doc(db, 'employees', editingEmployee.id);
+        try {
+          await updateDoc(empRef, {
+            name: trimmedName,
+            mobile: trimmedMobile,
+            department: resolvedDepartment,
+            joiningDate,
+            basicSalary: roundCurrency(parsedSalary),
+            updatedAt: serverTimestamp(),
+          });
+        } catch (error) {
+          handleFirestoreError(
+            error,
+            OperationType.UPDATE,
+            `employees/${editingEmployee.id}`
+          );
+        }
+        cancelEditEmployee();
+        onEmployeeUpdated(
+          `Updated employee ${trimmedName} (${resolvedDepartment}).`
+        );
+        return;
+      }
+
+      const rawAutoId = doc(collection(db, 'employees')).id
+        .slice(0, 8)
+        .toUpperCase();
+      const employeeId = `EMP-${rawAutoId}`;
+
       const empRef = doc(db, 'employees', employeeId);
       try {
         await setDoc(empRef, {
@@ -324,12 +408,23 @@ export function EmployeesView({
       onEmployeeCreated(trimmedName, resolvedDepartment);
     } catch (error) {
       setFormError(
-        error instanceof Error ? error.message : 'Unable to add employee.'
+        error instanceof Error ? error.message : 'Unable to save employee.'
       );
     } finally {
       setIsSubmitting(false);
     }
   };
+
+  const moneyOutByIdOrRef = useMemo(() => {
+    const map = new Map<string, MoneyOutRecord>();
+    for (const rec of moneyOutRecords) {
+      map.set(rec.id, rec);
+      if (rec.reference) {
+        map.set(rec.reference, rec);
+      }
+    }
+    return map;
+  }, [moneyOutRecords]);
 
   return (
     <div className="space-y-6">
@@ -410,22 +505,37 @@ export function EmployeesView({
 
       {/* Main Responsive Split: Add Employee Form (Left) + Employee List & Advances (Right) */}
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
-        {/* Add Employee Form Card */}
+        {/* Add / Edit Employee Form Card */}
         <section
           aria-labelledby="add-employee-heading"
           className="xl:col-span-4 bg-white border border-slate-200 rounded-lg overflow-hidden"
         >
-          <div className="px-5 py-4 border-b border-slate-200">
-            <h2
-              id="add-employee-heading"
-              className="font-display text-base font-semibold text-slate-900"
-            >
-              Add Employee
-            </h2>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Register mill workers and staff to track salaries and weekly
-              advances
-            </p>
+          <div className="px-5 py-4 border-b border-slate-200 flex items-start justify-between gap-2">
+            <div>
+              <h2
+                id="add-employee-heading"
+                className="font-display text-base font-semibold text-slate-900"
+              >
+                {editingEmployee
+                  ? `Edit Employee: ${editingEmployee.name}`
+                  : 'Add Employee'}
+              </h2>
+              <p className="text-xs text-slate-500 mt-0.5">
+                {editingEmployee
+                  ? 'Update worker details or basic monthly salary'
+                  : 'Register mill workers and staff to track salaries and weekly advances'}
+              </p>
+            </div>
+            {editingEmployee && (
+              <button
+                type="button"
+                onClick={cancelEditEmployee}
+                className="p-1 text-slate-400 hover:text-slate-700 rounded cursor-pointer"
+                title="Cancel editing"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
           </div>
 
           <form onSubmit={handleAddEmployee} className="p-5 space-y-4">
@@ -571,14 +681,51 @@ export function EmployeesView({
               </div>
             </div>
 
-            <button
-              type="submit"
-              disabled={isSubmitting || !isSalaryValid}
-              className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium text-white bg-[#1e3a8a] hover:bg-[#1e40af] disabled:opacity-60 disabled:cursor-not-allowed rounded-md transition-colors cursor-pointer whitespace-nowrap"
-            >
-              <Plus className="w-4 h-4 shrink-0" />
-              {isSubmitting ? 'Saving Employee...' : 'Add Employee'}
-            </button>
+            <div className="space-y-2">
+              <button
+                type="submit"
+                disabled={isSubmitting || !isSalaryValid}
+                className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium text-white bg-[#1e3a8a] hover:bg-[#1e40af] disabled:opacity-60 disabled:cursor-not-allowed rounded-md transition-colors cursor-pointer whitespace-nowrap"
+              >
+                {editingEmployee ? (
+                  <>
+                    <Check className="w-4 h-4 shrink-0" />
+                    {isSubmitting ? 'Saving Changes...' : 'Save Changes'}
+                  </>
+                ) : (
+                  <>
+                    <Plus className="w-4 h-4 shrink-0" />
+                    {isSubmitting ? 'Saving Employee...' : 'Add Employee'}
+                  </>
+                )}
+              </button>
+
+              {editingEmployee && (
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={cancelEditEmployee}
+                    disabled={isSubmitting}
+                    className="w-full px-3 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-md transition-colors cursor-pointer"
+                  >
+                    Cancel Edit
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const target = editingEmployee;
+                      cancelEditEmployee();
+                      onDeleteEmployee(target);
+                    }}
+                    disabled={isSubmitting}
+                    className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium text-red-700 bg-red-50 border border-red-200 hover:bg-red-100 rounded-md transition-colors cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    Delete Employee
+                  </button>
+                </div>
+              )}
+            </div>
           </form>
         </section>
 
@@ -787,7 +934,7 @@ export function EmployeesView({
                               </p>
                             </td>
                             <td className="py-3.5 px-5 text-right whitespace-nowrap">
-                              <div className="inline-flex items-center justify-end gap-2">
+                              <div className="inline-flex items-center justify-end gap-1.5">
                                 <button
                                   type="button"
                                   onClick={() => onGiveAdvance(emp)}
@@ -802,6 +949,24 @@ export function EmployeesView({
                                   className="px-2.5 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-md transition-colors cursor-pointer"
                                 >
                                   Profile
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => startEditEmployee(emp)}
+                                  title="Edit Employee"
+                                  aria-label={`Edit ${emp.name}`}
+                                  className="p-1.5 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded-md transition-colors cursor-pointer"
+                                >
+                                  <Edit2 className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => onDeleteEmployee(emp)}
+                                  title="Delete Employee"
+                                  aria-label={`Delete ${emp.name}`}
+                                  className="p-1.5 text-slate-500 hover:text-red-700 hover:bg-red-50 rounded-md transition-colors cursor-pointer"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
                                 </button>
                               </div>
                             </td>
@@ -893,49 +1058,72 @@ export function EmployeesView({
                         <th className="py-3 px-4">Employee</th>
                         <th className="py-3 px-4">Method</th>
                         <th className="py-3 px-4">Note</th>
-                        <th className="py-3 px-5 text-right">Amount</th>
+                        <th className="py-3 px-4 text-right">Amount</th>
+                        <th className="py-3 px-5 text-right">Action</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-200 text-sm">
-                      {filteredAdvances.map((adv) => (
-                        <tr
-                          key={adv.id}
-                          className="hover:bg-slate-50/80 transition-colors"
-                        >
-                          <td className="py-3.5 px-5 whitespace-nowrap">
-                            <p className="font-mono text-xs font-semibold text-slate-900">
-                              {adv.reference}
-                            </p>
-                            <p className="text-xs text-slate-500 mt-0.5">
-                              {formatIsoDate(adv.advanceDate)}
-                            </p>
-                          </td>
-                          <td className="py-3.5 px-4 whitespace-nowrap">
-                            <p className="font-medium text-slate-900">
-                              {adv.employeeName}
-                            </p>
-                            <p className="text-xs text-slate-500 mt-0.5">
-                              {adv.department}
-                            </p>
-                          </td>
-                          <td className="py-3.5 px-4 whitespace-nowrap">
-                            <span className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-700">
-                              {adv.paymentMethod === 'Bank' ? (
-                                <Building2 className="w-3.5 h-3.5 text-slate-400" />
+                      {filteredAdvances.map((adv) => {
+                        const linkedMoneyOut =
+                          moneyOutByIdOrRef.get(adv.moneyOutId) ??
+                          moneyOutByIdOrRef.get(adv.reference) ??
+                          null;
+                        return (
+                          <tr
+                            key={adv.id}
+                            className="hover:bg-slate-50/80 transition-colors"
+                          >
+                            <td className="py-3.5 px-5 whitespace-nowrap">
+                              <p className="font-mono text-xs font-semibold text-slate-900">
+                                {adv.reference}
+                              </p>
+                              <p className="text-xs text-slate-500 mt-0.5">
+                                {formatIsoDate(adv.advanceDate)}
+                              </p>
+                            </td>
+                            <td className="py-3.5 px-4 whitespace-nowrap">
+                              <p className="font-medium text-slate-900">
+                                {adv.employeeName}
+                              </p>
+                              <p className="text-xs text-slate-500 mt-0.5">
+                                {adv.department}
+                              </p>
+                            </td>
+                            <td className="py-3.5 px-4 whitespace-nowrap">
+                              <span className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-700">
+                                {adv.paymentMethod === 'Bank' ? (
+                                  <Building2 className="w-3.5 h-3.5 text-slate-400" />
+                                ) : (
+                                  <Banknote className="w-3.5 h-3.5 text-slate-400" />
+                                )}
+                                {adv.paymentMethod}
+                              </span>
+                            </td>
+                            <td className="py-3.5 px-4 text-xs text-slate-600 max-w-xs break-words">
+                              {adv.note || '—'}
+                            </td>
+                            <td className="py-3.5 px-4 text-right font-mono text-sm font-semibold tabular-nums text-red-700 whitespace-nowrap">
+                              −{formatCurrency(adv.amount)}
+                            </td>
+                            <td className="py-3.5 px-5 text-right whitespace-nowrap">
+                              {linkedMoneyOut ? (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    onCorrectMoneyOut(linkedMoneyOut)
+                                  }
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded transition-colors cursor-pointer whitespace-nowrap"
+                                >
+                                  <RotateCcw className="w-3.5 h-3.5 shrink-0" />
+                                  Correct / Adjust
+                                </button>
                               ) : (
-                                <Banknote className="w-3.5 h-3.5 text-slate-400" />
+                                <span className="text-xs text-slate-400">—</span>
                               )}
-                              {adv.paymentMethod}
-                            </span>
-                          </td>
-                          <td className="py-3.5 px-4 text-xs text-slate-600 max-w-xs break-words">
-                            {adv.note || '—'}
-                          </td>
-                          <td className="py-3.5 px-5 text-right font-mono text-sm font-semibold tabular-nums text-red-700 whitespace-nowrap">
-                            −{formatCurrency(adv.amount)}
-                          </td>
-                        </tr>
-                      ))}
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>

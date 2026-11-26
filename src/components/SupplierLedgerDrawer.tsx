@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Banknote, Edit2, Printer, X } from 'lucide-react';
+import { Banknote, Edit2, Lock, Printer, RotateCcw, Trash2, X } from 'lucide-react';
 import type {
   MoneyOutRecord,
   PurchaseRecord,
@@ -28,8 +28,13 @@ interface SupplierLedgerDrawerProps {
   initialTab?: SupplierDrawerTab;
   onClose: () => void;
   onEditSupplier: (supplier: SupplierRecord) => void;
+  onDeleteSupplier: (supplier: SupplierRecord) => void;
   onPaySupplier: (supplier: SupplierRecord) => void;
   onPrintStatement: (supplier: SupplierRecord) => void;
+  onEditPurchase: (purchase: PurchaseRecord) => void;
+  onDeletePurchase: (purchase: PurchaseRecord) => void;
+  onCorrectSupplierLedgerEntry: (entry: SupplierLedgerEntry) => void;
+  onCorrectMoneyOut: (record: MoneyOutRecord) => void;
 }
 
 export function SupplierLedgerDrawer({
@@ -40,8 +45,13 @@ export function SupplierLedgerDrawer({
   initialTab = 'ledger',
   onClose,
   onEditSupplier,
+  onDeleteSupplier,
   onPaySupplier,
   onPrintStatement,
+  onEditPurchase,
+  onDeletePurchase,
+  onCorrectSupplierLedgerEntry,
+  onCorrectMoneyOut,
 }: SupplierLedgerDrawerProps) {
   const [activeTab, setActiveTab] = useState<SupplierDrawerTab>(initialTab);
 
@@ -102,6 +112,8 @@ export function SupplierLedgerDrawer({
         const moneyOut = moneyOutByLedgerId.get(entry.id) ?? null;
         return {
           id: entry.id,
+          entry,
+          moneyOut,
           reference: entry.reference || entry.id,
           amount: entry.debit,
           paymentDate: moneyOut?.paymentDate ?? null,
@@ -168,6 +180,14 @@ export function SupplierLedgerDrawer({
             >
               <Edit2 className="w-3.5 h-3.5" />
               Edit
+            </button>
+            <button
+              type="button"
+              onClick={() => onDeleteSupplier(supplier)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-700 bg-red-50 border border-red-200 hover:bg-red-100 rounded-md transition-colors cursor-pointer whitespace-nowrap"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              Delete
             </button>
             <button
               type="button"
@@ -310,6 +330,7 @@ export function SupplierLedgerDrawer({
                           <th className="py-2.5 px-4 text-right">Credit (+Debt)</th>
                           <th className="py-2.5 px-4 text-right">Debit (−Paid)</th>
                           <th className="py-2.5 px-4 text-right">Payable</th>
+                          <th className="py-2.5 px-4 text-right">Action</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-200 text-sm">
@@ -367,6 +388,16 @@ export function SupplierLedgerDrawer({
                                 {formatCurrency(runningPayable)}
                               </span>
                             </td>
+                            <td className="py-3 px-4 align-top text-right whitespace-nowrap">
+                              <button
+                                type="button"
+                                onClick={() => onCorrectSupplierLedgerEntry(entry)}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded transition-colors cursor-pointer whitespace-nowrap"
+                              >
+                                <RotateCcw className="w-3.5 h-3.5 shrink-0" />
+                                Correct / Adjust
+                              </button>
+                            </td>
                           </tr>
                         ))}
                       </tbody>
@@ -396,36 +427,86 @@ export function SupplierLedgerDrawer({
                           <th className="py-2.5 px-4 text-right">Qty</th>
                           <th className="py-2.5 px-4 text-right">Rate</th>
                           <th className="py-2.5 px-4 text-right">Total</th>
+                          <th className="py-2.5 px-4">Status</th>
+                          <th className="py-2.5 px-4 text-right">Actions</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-200 text-sm">
-                        {supplierPurchases.map((p) => (
-                          <tr
-                            key={p.id}
-                            className="hover:bg-slate-50/70 transition-colors"
-                          >
-                            <td className="py-3 px-4 whitespace-nowrap">
-                              <p className="font-mono text-xs font-semibold text-slate-900">
-                                {p.reference}
-                              </p>
-                              <p className="text-xs text-slate-500 mt-0.5">
-                                {formatIsoDate(p.purchaseDate)}
-                              </p>
-                            </td>
-                            <td className="py-3 px-4 text-xs font-medium text-slate-900">
-                              {p.itemName}
-                            </td>
-                            <td className="py-3 px-4 text-right font-mono text-xs tabular-nums whitespace-nowrap text-slate-700">
-                              {formatNumber(p.quantity)} {p.unit}
-                            </td>
-                            <td className="py-3 px-4 text-right font-mono text-xs tabular-nums whitespace-nowrap text-slate-700">
-                              {formatCurrency(p.rate)}
-                            </td>
-                            <td className="py-3 px-4 text-right font-mono text-xs font-semibold tabular-nums whitespace-nowrap text-slate-900">
-                              {formatCurrency(p.totalAmount)}
-                            </td>
-                          </tr>
-                        ))}
+                        {supplierPurchases.map((p) => {
+                          const isPending = p.status !== 'Paid';
+                          return (
+                            <tr
+                              key={p.id}
+                              className="hover:bg-slate-50/70 transition-colors"
+                            >
+                              <td className="py-3 px-4 whitespace-nowrap">
+                                <p className="font-mono text-xs font-semibold text-slate-900">
+                                  {p.reference}
+                                </p>
+                                <p className="text-xs text-slate-500 mt-0.5">
+                                  {formatIsoDate(p.purchaseDate)}
+                                </p>
+                              </td>
+                              <td className="py-3 px-4 text-xs font-medium text-slate-900">
+                                {p.itemName}
+                              </td>
+                              <td className="py-3 px-4 text-right font-mono text-xs tabular-nums whitespace-nowrap text-slate-700">
+                                {formatNumber(p.quantity)} {p.unit}
+                              </td>
+                              <td className="py-3 px-4 text-right font-mono text-xs tabular-nums whitespace-nowrap text-slate-700">
+                                {formatCurrency(p.rate)}
+                              </td>
+                              <td className="py-3 px-4 text-right font-mono text-xs font-semibold tabular-nums whitespace-nowrap text-slate-900">
+                                {formatCurrency(p.totalAmount)}
+                              </td>
+                              <td className="py-3 px-4 whitespace-nowrap">
+                                <span
+                                  className={`inline-flex items-center px-2 py-0.5 text-[11px] font-medium rounded border ${
+                                    isPending
+                                      ? 'text-amber-800 bg-amber-50 border-amber-200'
+                                      : 'text-emerald-800 bg-emerald-50 border-emerald-200'
+                                  }`}
+                                >
+                                  {isPending ? 'Pending' : 'Paid'}
+                                </span>
+                              </td>
+                              <td className="py-3 px-4 text-right whitespace-nowrap">
+                                <div className="inline-flex items-center gap-1">
+                                  <button
+                                    type="button"
+                                    disabled={!isPending}
+                                    onClick={() => onEditPurchase(p)}
+                                    title={
+                                      isPending
+                                        ? 'Edit Purchase'
+                                        : 'Paid purchases are locked and cannot be edited'
+                                    }
+                                    className="p-1.5 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                                  >
+                                    {isPending ? (
+                                      <Edit2 className="w-3.5 h-3.5" />
+                                    ) : (
+                                      <Lock className="w-3.5 h-3.5" />
+                                    )}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={!isPending}
+                                    onClick={() => onDeletePurchase(p)}
+                                    title={
+                                      isPending
+                                        ? 'Delete Purchase'
+                                        : 'Paid purchases are locked and cannot be deleted'
+                                    }
+                                    className="p-1.5 text-slate-500 hover:text-red-700 hover:bg-red-50 rounded transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -461,6 +542,7 @@ export function SupplierLedgerDrawer({
                           <th className="py-2.5 px-4">Method</th>
                           <th className="py-2.5 px-4">Note</th>
                           <th className="py-2.5 px-4 text-right">Amount Paid</th>
+                          <th className="py-2.5 px-4 text-right">Action</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-200 text-sm">
@@ -485,6 +567,22 @@ export function SupplierLedgerDrawer({
                             </td>
                             <td className="py-3 px-4 text-right font-mono text-xs font-semibold tabular-nums text-emerald-700 whitespace-nowrap">
                               {formatCurrency(pay.amount)}
+                            </td>
+                            <td className="py-3 px-4 text-right whitespace-nowrap">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (pay.moneyOut) {
+                                    onCorrectMoneyOut(pay.moneyOut);
+                                  } else {
+                                    onCorrectSupplierLedgerEntry(pay.entry);
+                                  }
+                                }}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded transition-colors cursor-pointer whitespace-nowrap"
+                              >
+                                <RotateCcw className="w-3.5 h-3.5 shrink-0" />
+                                Correct / Adjust
+                              </button>
                             </td>
                           </tr>
                         ))}

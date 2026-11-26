@@ -8,6 +8,8 @@ import {
   Edit3,
   HandCoins,
   Phone,
+  RotateCcw,
+  Trash2,
   UserRound,
   X,
 } from 'lucide-react';
@@ -17,6 +19,7 @@ import {
   EMPLOYEE_VALIDATION,
   type EmployeeAdvanceRecord,
   type EmployeeRecord,
+  type MoneyOutRecord,
 } from '../types/mill';
 import {
   formatCurrency,
@@ -29,8 +32,11 @@ import {
 interface EmployeeProfileDrawerProps {
   employee: EmployeeRecord | null;
   advances: EmployeeAdvanceRecord[];
+  moneyOutRecords: MoneyOutRecord[];
   onClose: () => void;
   onGiveAdvance: (employee: EmployeeRecord) => void;
+  onDeleteEmployee: (employee: EmployeeRecord) => void;
+  onCorrectMoneyOut: (record: MoneyOutRecord) => void;
   onProfileUpdated: (message: string) => void;
 }
 
@@ -52,8 +58,11 @@ function getCurrentMonthLabel(isoDate: string): string {
 export function EmployeeProfileDrawer({
   employee,
   advances,
+  moneyOutRecords,
   onClose,
   onGiveAdvance,
+  onDeleteEmployee,
+  onCorrectMoneyOut,
   onProfileUpdated,
 }: EmployeeProfileDrawerProps) {
   const todayIso = getTodayIsoDate();
@@ -144,6 +153,17 @@ export function EmployeeProfileDrawer({
       remainingSalary: roundCurrency(basicSalary - cleanMonthTotal),
     };
   }, [employeeAdvances, currentYearMonth, employee]);
+
+  const moneyOutByIdOrRef = useMemo(() => {
+    const map = new Map<string, MoneyOutRecord>();
+    for (const rec of moneyOutRecords) {
+      map.set(rec.id, rec);
+      if (rec.reference) {
+        map.set(rec.reference, rec);
+      }
+    }
+    return map;
+  }, [moneyOutRecords]);
 
   if (!employee) return null;
 
@@ -280,6 +300,14 @@ export function EmployeeProfileDrawer({
                 Edit
               </button>
             )}
+            <button
+              type="button"
+              onClick={() => onDeleteEmployee(employee)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-700 bg-red-50 border border-red-200 hover:bg-red-100 rounded-md transition-colors cursor-pointer"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              Delete
+            </button>
             <button
               type="button"
               onClick={onClose}
@@ -544,6 +572,10 @@ export function EmployeeProfileDrawer({
             <div className="border border-slate-200 rounded-lg overflow-hidden divide-y divide-slate-200">
               {employeeAdvances.map((adv) => {
                 const isThisMonth = adv.advanceDate.startsWith(currentYearMonth);
+                const linkedMoneyOut =
+                  moneyOutByIdOrRef.get(adv.moneyOutId) ??
+                  moneyOutByIdOrRef.get(adv.reference) ??
+                  null;
                 return (
                   <div
                     key={adv.id}
@@ -578,9 +610,21 @@ export function EmployeeProfileDrawer({
                         </p>
                       )}
                     </div>
-                    <p className="font-mono text-sm font-semibold tabular-nums text-red-700 whitespace-nowrap shrink-0">
-                      −{formatCurrency(adv.amount)}
-                    </p>
+                    <div className="flex items-center gap-2.5 shrink-0">
+                      <p className="font-mono text-sm font-semibold tabular-nums text-red-700 whitespace-nowrap">
+                        −{formatCurrency(adv.amount)}
+                      </p>
+                      {linkedMoneyOut && (
+                        <button
+                          type="button"
+                          onClick={() => onCorrectMoneyOut(linkedMoneyOut)}
+                          className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded transition-colors cursor-pointer whitespace-nowrap"
+                        >
+                          <RotateCcw className="w-3 h-3 shrink-0" />
+                          Correct / Adjust
+                        </button>
+                      )}
+                    </div>
                   </div>
                 );
               })}

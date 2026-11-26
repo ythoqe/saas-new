@@ -6,6 +6,7 @@ import {
   Edit2,
   Plus,
   Search,
+  Trash2,
   Truck,
 } from 'lucide-react';
 import type { SupplierRecord, SupplierWithLedgerSummary } from '../types/mill';
@@ -24,6 +25,7 @@ interface SupplierManagementViewProps {
   isLoading: boolean;
   onAddSupplier: () => void;
   onEditSupplier: (supplier: SupplierRecord) => void;
+  onDeleteSupplier: (supplier: SupplierRecord) => void;
   onOpenLedger: (supplier: SupplierRecord) => void;
   onPaySupplier: (supplier: SupplierRecord) => void;
 }
@@ -33,6 +35,7 @@ export function SupplierManagementView({
   isLoading,
   onAddSupplier,
   onEditSupplier,
+  onDeleteSupplier,
   onOpenLedger,
   onPaySupplier,
 }: SupplierManagementViewProps) {
@@ -348,9 +351,19 @@ export function SupplierManagementView({
                             type="button"
                             onClick={() => onEditSupplier(item.supplier)}
                             aria-label={`Edit ${item.supplier.supplierName}`}
+                            title="Edit Supplier"
                             className="p-1.5 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded-md transition-colors cursor-pointer"
                           >
                             <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onDeleteSupplier(item.supplier)}
+                            aria-label={`Delete ${item.supplier.supplierName}`}
+                            title="Delete Supplier"
+                            className="p-1.5 text-slate-500 hover:text-red-700 hover:bg-red-50 rounded-md transition-colors cursor-pointer"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
                           </button>
                         </div>
                       </td>

@@ -6,6 +6,7 @@ import {
   Edit2,
   Plus,
   Search,
+  Trash2,
   Users,
 } from 'lucide-react';
 import type { ClientRecord, ClientWithLedgerSummary } from '../types/mill';
@@ -24,6 +25,7 @@ interface ClientManagementViewProps {
   isLoading: boolean;
   onAddClient: () => void;
   onEditClient: (client: ClientRecord) => void;
+  onDeleteClient: (client: ClientRecord) => void;
   onOpenLedger: (client: ClientRecord) => void;
   onReceivePayment: (client: ClientRecord) => void;
 }
@@ -33,6 +35,7 @@ export function ClientManagementView({
   isLoading,
   onAddClient,
   onEditClient,
+  onDeleteClient,
   onOpenLedger,
   onReceivePayment,
 }: ClientManagementViewProps) {
@@ -362,9 +365,19 @@ export function ClientManagementView({
                             type="button"
                             onClick={() => onEditClient(item.client)}
                             aria-label={`Edit ${item.client.clientName}`}
+                            title="Edit Client"
                             className="p-1.5 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded-md transition-colors cursor-pointer"
                           >
                             <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onDeleteClient(item.client)}
+                            aria-label={`Delete ${item.client.clientName}`}
+                            title="Delete Client"
+                            className="p-1.5 text-slate-500 hover:text-red-700 hover:bg-red-50 rounded-md transition-colors cursor-pointer"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
                           </button>
                         </div>
                       </td>

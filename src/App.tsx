@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { onAuthStateChanged, signOut, type User } from 'firebase/auth';
-import { collection, onSnapshot, query, where } from 'firebase/firestore';
+import {
+  collection,
+  deleteDoc,
+  doc,
+  onSnapshot,
+  query,
+  where,
+} from 'firebase/firestore';
 import { CheckCircle2, Menu, Plus, X } from 'lucide-react';
 import { auth, db, handleFirestoreError, OperationType } from './firebase';
 import { AddClientDrawer } from './components/AddClientDrawer';
@@ -12,7 +19,13 @@ import {
 } from './components/ClientLedgerDrawer';
 import { ClientManagementView } from './components/ClientManagementView';
 import { CompleteDeliverModal } from './components/CompleteDeliverModal';
+import {
+  ConfirmDeleteModal,
+  type DeleteTargetConfig,
+} from './components/ConfirmDeleteModal';
 import { DashboardOverview } from './components/DashboardOverview';
+import { EditOrderModal } from './components/EditOrderModal';
+import { EditPurchaseModal } from './components/EditPurchaseModal';
 import { EmployeeProfileDrawer } from './components/EmployeeProfileDrawer';
 import { EmployeesView } from './components/EmployeesView';
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -25,6 +38,10 @@ import {
   type PrintDocumentType,
 } from './components/InvoicePrintModal';
 import { LedgerBookView } from './components/LedgerBookView';
+import {
+  LedgerReversalAdjustmentModal,
+  type LedgerAdjustmentTarget,
+} from './components/LedgerReversalAdjustmentModal';
 import { NewOrderPage } from './components/NewOrderPage';
 import { NewPurchasePage } from './components/NewPurchasePage';
 import { OrdersListView } from './components/OrdersListView';
@@ -164,6 +181,17 @@ function MillDashboardShell() {
     | null
   >(null);
 
+  // Correction, Edit/Delete, and Append-Only Reversal/Adjustment modals
+  const [deleteTarget, setDeleteTarget] = useState<DeleteTargetConfig | null>(
+    null
+  );
+  const [editingOrder, setEditingOrder] = useState<OrderRecord | null>(null);
+  const [editingPurchase, setEditingPurchase] = useState<PurchaseRecord | null>(
+    null
+  );
+  const [ledgerAdjustmentTarget, setLedgerAdjustmentTarget] =
+    useState<LedgerAdjustmentTarget | null>(null);
+
   const [toast, setToast] = useState<ToastState | null>(null);
 
   // Auth listener
@@ -207,6 +235,10 @@ function MillDashboardShell() {
         setGivingAdvanceEmployeeId(null);
         setPrintDocument(null);
         setStatementTarget(null);
+        setDeleteTarget(null);
+        setEditingOrder(null);
+        setEditingPurchase(null);
+        setLedgerAdjustmentTarget(null);
       }
     });
     return () => unsubscribe();
@@ -330,12 +362,16 @@ function MillDashboardShell() {
         setMoneyInRecords(
           snapshot.docs.map((docSnap) => {
             const data = docSnap.data();
+            const refStr = String(data.reference ?? '');
+            const isAdjustment =
+              data.source === 'adjustment' || refStr.startsWith('REV-');
             return {
               id: docSnap.id,
               ownerId: String(data.ownerId ?? ''),
+              source: isAdjustment ? 'adjustment' : 'client',
               clientId: String(data.clientId ?? ''),
               ledgerEntryId: String(data.ledgerEntryId ?? ''),
-              reference: String(data.reference ?? ''),
+              reference: refStr,
               amount: Number(data.amount ?? 0),
               paymentDate: String(data.paymentDate ?? ''),
               paymentMethod: data.paymentMethod,
@@ -413,7 +449,9 @@ function MillDashboardShell() {
               unit: data.unit,
               rate: Number(data.rate ?? 0),
               totalAmount: Number(data.totalAmount ?? 0),
+              status: data.status === 'Paid' ? 'Paid' : 'Pending',
               createdAt: data.createdAt ?? null,
+              updatedAt: data.updatedAt ?? null,
             };
           })
         );
@@ -429,21 +467,27 @@ function MillDashboardShell() {
           snapshot.docs.map((docSnap) => {
             const data = docSnap.data();
             const refStr = String(data.reference ?? '');
+            const isAdjustment =
+              data.source === 'adjustment' || refStr.startsWith('REV-');
             const isAdvance =
-              Boolean(data.advanceId) ||
-              refStr.startsWith('ADV-') ||
-              String(data.category ?? '') === 'Employee Advance';
+              !isAdjustment &&
+              (Boolean(data.advanceId) ||
+                refStr.startsWith('ADV-') ||
+                String(data.category ?? '') === 'Employee Advance');
             const isExpense =
+              !isAdjustment &&
               !isAdvance &&
               (Boolean(data.expenseId) || refStr.startsWith('EXP-'));
             return {
               id: docSnap.id,
               ownerId: String(data.ownerId ?? ''),
-              source: isAdvance
-                ? 'advance'
-                : isExpense
-                  ? 'expense'
-                  : 'supplier',
+              source: isAdjustment
+                ? 'adjustment'
+                : isAdvance
+                  ? 'advance'
+                  : isExpense
+                    ? 'expense'
+                    : 'supplier',
               supplierId: String(data.supplierId ?? ''),
               ledgerEntryId: String(data.ledgerEntryId ?? ''),
               expenseId: String(data.expenseId ?? ''),
@@ -944,6 +988,249 @@ function MillDashboardShell() {
     setSelectedSupplierId(supplier.id);
   };
 
+  // Master Data & Pending/Processing Transaction Delete Helpers
+  const handleRequestDeleteClient = (client: ClientRecord) => {
+    setDeleteTarget({
+      title: 'Delete Client Profile',
+      entityLabel: `${client.clientName} (${client.companyName})`,
+      description:
+        'Deleting this client removes the master profile from active lists. Past append-only client_ledger and money_in records remain intact for accounting audit integrity.',
+      confirmLabel: 'Delete Client',
+      onConfirm: async () => {
+        try {
+          await deleteDoc(doc(db, 'clients', client.id));
+        } catch (err) {
+          handleFirestoreError(err, OperationType.DELETE, `clients/${client.id}`);
+        }
+        if (selectedLedgerClientId === client.id) {
+          setSelectedLedgerClientId(null);
+        }
+        if (editingClient?.id === client.id) {
+          setClientDrawerOpen(false);
+          setEditingClient(null);
+        }
+        setToast({
+          message: `Deleted client ${client.clientName} (${client.companyName}).`,
+        });
+      },
+    });
+  };
+
+  const handleRequestDeleteSupplier = (supplier: SupplierRecord) => {
+    setDeleteTarget({
+      title: 'Delete Supplier Profile',
+      entityLabel: `${supplier.supplierName} (${supplier.companyName})`,
+      description:
+        'Deleting this supplier removes the master profile from active lists. Past append-only supplier_ledger and money_out records remain intact for accounting audit integrity.',
+      confirmLabel: 'Delete Supplier',
+      onConfirm: async () => {
+        try {
+          await deleteDoc(doc(db, 'suppliers', supplier.id));
+        } catch (err) {
+          handleFirestoreError(
+            err,
+            OperationType.DELETE,
+            `suppliers/${supplier.id}`
+          );
+        }
+        if (selectedSupplierId === supplier.id) {
+          setSelectedSupplierId(null);
+        }
+        if (editingSupplier?.id === supplier.id) {
+          setSupplierDrawerOpen(false);
+          setEditingSupplier(null);
+        }
+        setToast({
+          message: `Deleted supplier ${supplier.supplierName} (${supplier.companyName}).`,
+        });
+      },
+    });
+  };
+
+  const handleRequestDeleteEmployee = (employee: EmployeeRecord) => {
+    setDeleteTarget({
+      title: 'Delete Employee Profile',
+      entityLabel: `${employee.name} (${employee.department})`,
+      description:
+        'Deleting this employee removes the master profile. Past weekly advance and money_out records remain intact for cash balance accuracy.',
+      confirmLabel: 'Delete Employee',
+      onConfirm: async () => {
+        try {
+          await deleteDoc(doc(db, 'employees', employee.id));
+        } catch (err) {
+          handleFirestoreError(
+            err,
+            OperationType.DELETE,
+            `employees/${employee.id}`
+          );
+        }
+        if (selectedEmployeeId === employee.id) {
+          setSelectedEmployeeId(null);
+        }
+        setToast({
+          message: `Deleted employee ${employee.name} (${employee.department}).`,
+        });
+      },
+    });
+  };
+
+  const handleRequestDeleteInventoryItem = (item: InventoryItem) => {
+    setDeleteTarget({
+      title: 'Delete Inventory Item',
+      entityLabel: `${item.itemName} (${formatNumber(item.currentStock)} ${item.unit})`,
+      description:
+        'Deleting this inventory item removes it from the stock catalog. Historical stock_movements logs remain preserved.',
+      confirmLabel: 'Delete Item',
+      onConfirm: async () => {
+        try {
+          await deleteDoc(doc(db, 'inventory', item.id));
+        } catch (err) {
+          handleFirestoreError(
+            err,
+            OperationType.DELETE,
+            `inventory/${item.id}`
+          );
+        }
+        setToast({
+          message: `Deleted inventory item ${item.itemName}.`,
+        });
+      },
+    });
+  };
+
+  const handleRequestDeleteOrder = (order: OrderRecord) => {
+    if (order.status !== 'Processing') {
+      setToast({
+        message: 'Only orders in "Processing" status can be deleted.',
+      });
+      return;
+    }
+    const client = clientsById.get(order.clientId);
+    setDeleteTarget({
+      title: 'Delete Processing Order',
+      entityLabel: `${order.id} — ${order.fabricType} (${client?.clientName ?? 'Client'})`,
+      description:
+        'Only orders in "Processing" status can be deleted because they have not yet been delivered or billed to client_ledger.',
+      confirmLabel: 'Delete Order',
+      onConfirm: async () => {
+        try {
+          await deleteDoc(doc(db, 'orders', order.id));
+        } catch (err) {
+          handleFirestoreError(err, OperationType.DELETE, `orders/${order.id}`);
+        }
+        setToast({
+          message: `Deleted processing order ${order.id}.`,
+        });
+      },
+    });
+  };
+
+  const handleRequestDeletePurchase = (purchase: PurchaseRecord) => {
+    if (purchase.status === 'Paid') {
+      setToast({
+        message: 'Paid purchases are locked and cannot be deleted.',
+      });
+      return;
+    }
+    const supplier = suppliersById.get(purchase.supplierId);
+    setDeleteTarget({
+      title: 'Delete Pending Purchase',
+      entityLabel: `${purchase.reference} — ${purchase.itemName} (${supplier?.supplierName ?? 'Supplier'})`,
+      description:
+        'Only Pending purchases can be deleted. Note: Because supplier_ledger is append-only, use "Correct / Adjust" inside the Supplier Ledger if you also need to reverse the corresponding payable credit.',
+      confirmLabel: 'Delete Purchase',
+      onConfirm: async () => {
+        try {
+          await deleteDoc(doc(db, 'purchases', purchase.id));
+        } catch (err) {
+          handleFirestoreError(
+            err,
+            OperationType.DELETE,
+            `purchases/${purchase.id}`
+          );
+        }
+        setToast({
+          message: `Deleted pending purchase ${purchase.reference}.`,
+        });
+      },
+    });
+  };
+
+  // Append-Only Ledger Reversal / Adjustment Helpers
+  const handleOpenCorrectClientLedger = (entry: ClientLedgerEntry) => {
+    const client = clientsById.get(entry.clientId) ?? null;
+    const linkedMoneyIn =
+      moneyInRecords.find(
+        (m) =>
+          m.ledgerEntryId === entry.id ||
+          (Boolean(entry.reference) && m.reference === entry.reference)
+      ) ?? null;
+    setLedgerAdjustmentTarget({
+      kind: 'client_ledger',
+      entry,
+      client,
+      linkedMoneyIn,
+    });
+  };
+
+  const handleOpenCorrectSupplierLedger = (entry: SupplierLedgerEntry) => {
+    const supplier = suppliersById.get(entry.supplierId) ?? null;
+    const linkedMoneyOut =
+      moneyOutRecords.find(
+        (m) =>
+          m.ledgerEntryId === entry.id ||
+          (Boolean(entry.reference) && m.reference === entry.reference)
+      ) ?? null;
+    setLedgerAdjustmentTarget({
+      kind: 'supplier_ledger',
+      entry,
+      supplier,
+      linkedMoneyOut,
+    });
+  };
+
+  const handleOpenCorrectMoneyIn = (record: MoneyInRecord) => {
+    const client = clientsById.get(record.clientId) ?? null;
+    const linkedLedgerEntry =
+      ledgerEntries.find(
+        (e) =>
+          e.id === record.ledgerEntryId ||
+          (Boolean(record.reference) && e.reference === record.reference)
+      ) ?? null;
+    setLedgerAdjustmentTarget({
+      kind: 'money_in',
+      record,
+      client,
+      linkedLedgerEntry,
+    });
+  };
+
+  const handleOpenCorrectMoneyOut = (record: MoneyOutRecord) => {
+    const supplier = record.supplierId
+      ? suppliersById.get(record.supplierId) ?? null
+      : null;
+    const employee = record.employeeId
+      ? employeesById.get(record.employeeId) ?? null
+      : null;
+    const linkedLedgerEntry = record.ledgerEntryId
+      ? supplierLedgerEntries.find((e) => e.id === record.ledgerEntryId) ?? null
+      : null;
+    const counterpartyLabel = supplier
+      ? `${supplier.supplierName} (${supplier.companyName})`
+      : employee
+        ? `${employee.name} (${employee.department})`
+        : record.category
+          ? `Factory Expense · ${record.category}`
+          : 'Cash Outflow';
+    setLedgerAdjustmentTarget({
+      kind: 'money_out',
+      record,
+      supplier,
+      counterpartyLabel,
+      linkedLedgerEntry,
+    });
+  };
+
   const buildPrintPayload = (
     clientId: string,
     order: OrderRecord | null,
@@ -1229,6 +1516,7 @@ function MillDashboardShell() {
               isLoading={isDataLoading}
               onAddClient={handleOpenAddClient}
               onEditClient={handleOpenEditClient}
+              onDeleteClient={handleRequestDeleteClient}
               onOpenLedger={(client) => handleOpenClientDrawer(client, 'ledger')}
               onReceivePayment={(client) => setReceivingPaymentClientId(client.id)}
             />
@@ -1242,6 +1530,8 @@ function MillDashboardShell() {
               isLoading={isDataLoading}
               onCreateNewOrder={() => setActiveSection('new-order')}
               onStartCompleteDeliver={(order) => setDeliveringOrderId(order.id)}
+              onEditOrder={(order) => setEditingOrder(order)}
+              onDeleteOrder={handleRequestDeleteOrder}
               onOpenClientLedger={(client) =>
                 handleOpenClientDrawer(client, 'ledger')
               }
@@ -1276,6 +1566,7 @@ function MillDashboardShell() {
               isLoading={isDataLoading}
               onAddSupplier={handleOpenAddSupplier}
               onEditSupplier={handleOpenEditSupplier}
+              onDeleteSupplier={handleRequestDeleteSupplier}
               onOpenLedger={(supplier) =>
                 handleOpenSupplierDrawer(supplier, 'ledger')
               }
@@ -1293,6 +1584,9 @@ function MillDashboardShell() {
               onOpenSupplierLedger={(supplier) =>
                 handleOpenSupplierDrawer(supplier, 'ledger')
               }
+              onEditPurchase={(purchase) => setEditingPurchase(purchase)}
+              onDeletePurchase={handleRequestDeletePurchase}
+              onStatusUpdated={(message) => setToast({ message })}
             />
           )}
 
@@ -1332,6 +1626,7 @@ function MillDashboardShell() {
               isLoading={isDataLoading}
               focusFormSignal={inventoryFormFocusSignal}
               onNavigateNewPurchase={() => setActiveSection('new-purchase')}
+              onDeleteItem={handleRequestDeleteInventoryItem}
               onFeedback={(message) => setToast({ message })}
             />
           )}
@@ -1340,6 +1635,7 @@ function MillDashboardShell() {
             <ExpensesView
               ownerId={user.uid}
               expenses={expenses}
+              moneyOutRecords={moneyOutRecords}
               isLoading={isDataLoading}
               focusFormSignal={expenseFormFocusSignal}
               onExpenseCreated={(expenseRef, category, amount, paymentMethod) => {
@@ -1349,6 +1645,7 @@ function MillDashboardShell() {
                   onAction: () => setActiveSection('overview'),
                 });
               }}
+              onCorrectMoneyOut={handleOpenCorrectMoneyOut}
             />
           )}
 
@@ -1357,6 +1654,7 @@ function MillDashboardShell() {
               ownerId={user.uid}
               employees={employees}
               advances={employeeAdvances}
+              moneyOutRecords={moneyOutRecords}
               isLoading={isDataLoading}
               focusFormSignal={employeeFormFocusSignal}
               onEmployeeCreated={(employeeName, department) => {
@@ -1364,10 +1662,13 @@ function MillDashboardShell() {
                   message: `Added employee ${employeeName} (${department}).`,
                 });
               }}
+              onEmployeeUpdated={(message) => setToast({ message })}
+              onDeleteEmployee={handleRequestDeleteEmployee}
               onGiveAdvance={(employee) =>
                 setGivingAdvanceEmployeeId(employee.id)
               }
               onOpenProfile={(employee) => setSelectedEmployeeId(employee.id)}
+              onCorrectMoneyOut={handleOpenCorrectMoneyOut}
             />
           )}
 
@@ -1393,6 +1694,8 @@ function MillDashboardShell() {
               onOpenSupplierPayments={(supplier) =>
                 handleOpenSupplierDrawer(supplier, 'payments')
               }
+              onCorrectMoneyIn={handleOpenCorrectMoneyIn}
+              onCorrectMoneyOut={handleOpenCorrectMoneyOut}
             />
           )}
 
@@ -1405,6 +1708,7 @@ function MillDashboardShell() {
               onPrintInvoiceEntry={(entry) =>
                 handleOpenPrintForLedgerEntry(entry, 'invoice')
               }
+              onCorrectLedgerEntry={handleOpenCorrectClientLedger}
             />
           )}
         </main>
@@ -1419,6 +1723,7 @@ function MillDashboardShell() {
           setClientDrawerOpen(false);
           setEditingClient(null);
         }}
+        onDeleteClient={handleRequestDeleteClient}
         onSuccess={(message) => setToast({ message })}
       />
 
@@ -1434,6 +1739,7 @@ function MillDashboardShell() {
           setEditingClient(client);
           setClientDrawerOpen(true);
         }}
+        onDeleteClient={handleRequestDeleteClient}
         onReceivePayment={(client) => setReceivingPaymentClientId(client.id)}
         onPrintInvoiceEntry={(entry) =>
           handleOpenPrintForLedgerEntry(entry, 'invoice')
@@ -1441,6 +1747,8 @@ function MillDashboardShell() {
         onPrintStatement={(client) =>
           setStatementTarget({ kind: 'client', id: client.id })
         }
+        onCorrectLedgerEntry={handleOpenCorrectClientLedger}
+        onCorrectMoneyIn={handleOpenCorrectMoneyIn}
         onSuccess={(message) => setToast({ message })}
       />
 
@@ -1503,6 +1811,7 @@ function MillDashboardShell() {
           setSupplierDrawerOpen(false);
           setEditingSupplier(null);
         }}
+        onDeleteSupplier={handleRequestDeleteSupplier}
         onSuccess={(message) => setToast({ message })}
       />
 
@@ -1518,10 +1827,15 @@ function MillDashboardShell() {
           setEditingSupplier(supplier);
           setSupplierDrawerOpen(true);
         }}
+        onDeleteSupplier={handleRequestDeleteSupplier}
         onPaySupplier={(supplier) => setPayingSupplierId(supplier.id)}
         onPrintStatement={(supplier) =>
           setStatementTarget({ kind: 'supplier', id: supplier.id })
         }
+        onEditPurchase={(purchase) => setEditingPurchase(purchase)}
+        onDeletePurchase={handleRequestDeletePurchase}
+        onCorrectSupplierLedgerEntry={handleOpenCorrectSupplierLedger}
+        onCorrectMoneyOut={handleOpenCorrectMoneyOut}
       />
 
       {/* Pay Supplier Modal (Atomic writeBatch to supplier_ledger + money_out) */}
@@ -1548,8 +1862,11 @@ function MillDashboardShell() {
       <EmployeeProfileDrawer
         employee={selectedEmployee}
         advances={employeeAdvances}
+        moneyOutRecords={moneyOutRecords}
         onClose={() => setSelectedEmployeeId(null)}
         onGiveAdvance={(employee) => setGivingAdvanceEmployeeId(employee.id)}
+        onDeleteEmployee={handleRequestDeleteEmployee}
+        onCorrectMoneyOut={handleOpenCorrectMoneyOut}
         onProfileUpdated={(message) => setToast({ message })}
       />
 
@@ -1567,6 +1884,52 @@ function MillDashboardShell() {
             actionLabel: 'View Dashboard',
             onAction: () => setActiveSection('overview'),
           });
+        }}
+      />
+
+      {/* Master Data & Pending/Processing Transaction Delete Modal */}
+      <ConfirmDeleteModal
+        target={deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+      />
+
+      {/* Edit Order Modal (Only for Processing orders) */}
+      <EditOrderModal
+        order={editingOrder}
+        client={editingOrder ? clientsById.get(editingOrder.clientId) ?? null : null}
+        onClose={() => setEditingOrder(null)}
+        onUpdated={(orderId) => {
+          setEditingOrder(null);
+          setToast({
+            message: `Updated processing order ${orderId}.`,
+          });
+        }}
+      />
+
+      {/* Edit Purchase Modal (Only for Pending purchases) */}
+      <EditPurchaseModal
+        purchase={editingPurchase}
+        supplier={
+          editingPurchase
+            ? suppliersById.get(editingPurchase.supplierId) ?? null
+            : null
+        }
+        ownerId={user.uid}
+        onClose={() => setEditingPurchase(null)}
+        onUpdated={(message) => {
+          setEditingPurchase(null);
+          setToast({ message });
+        }}
+      />
+
+      {/* Append-Only Ledger Reversal & Adjustment Modal */}
+      <LedgerReversalAdjustmentModal
+        target={ledgerAdjustmentTarget}
+        ownerId={user.uid}
+        onClose={() => setLedgerAdjustmentTarget(null)}
+        onSuccess={(message) => {
+          setLedgerAdjustmentTarget(null);
+          setToast({ message });
         }}
       />
       </div>

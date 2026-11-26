@@ -6,7 +6,7 @@ import {
   updateDoc,
   writeBatch,
 } from 'firebase/firestore';
-import { X } from 'lucide-react';
+import { Trash2, X } from 'lucide-react';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import {
   CLIENT_VALIDATION,
@@ -20,6 +20,7 @@ interface AddClientDrawerProps {
   ownerId: string;
   editingClient: ClientRecord | null;
   onClose: () => void;
+  onDeleteClient?: (client: ClientRecord) => void;
   onSuccess: (message: string) => void;
 }
 
@@ -28,6 +29,7 @@ export function AddClientDrawer({
   ownerId,
   editingClient,
   onClose,
+  onDeleteClient,
   onSuccess,
 }: AddClientDrawerProps) {
   const [clientName, setClientName] = useState('');
@@ -378,26 +380,45 @@ export function AddClientDrawer({
           </div>
 
           {/* Drawer Footer */}
-          <div className="px-6 py-4 border-t border-slate-200 bg-slate-50 flex items-center justify-end gap-3 shrink-0">
-            <button
-              type="button"
-              onClick={onClose}
-              disabled={isSubmitting}
-              className="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-md transition-colors cursor-pointer whitespace-nowrap"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={isSubmitting}
-              className="px-4 py-2 text-sm font-medium text-white bg-[#1e3a8a] hover:bg-[#1e40af] disabled:opacity-60 rounded-md transition-colors cursor-pointer whitespace-nowrap"
-            >
-              {isSubmitting
-                ? 'Saving...'
-                : isEditing
-                  ? 'Save Changes'
-                  : 'Save Client'}
-            </button>
+          <div className="px-6 py-4 border-t border-slate-200 bg-slate-50 flex items-center justify-between gap-3 shrink-0">
+            <div>
+              {editingClient && onDeleteClient ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const target = editingClient;
+                    onClose();
+                    onDeleteClient(target);
+                  }}
+                  disabled={isSubmitting}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-red-700 bg-red-50 border border-red-200 hover:bg-red-100 rounded-md transition-colors cursor-pointer whitespace-nowrap"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Delete Client
+                </button>
+              ) : null}
+            </div>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={onClose}
+                disabled={isSubmitting}
+                className="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-md transition-colors cursor-pointer whitespace-nowrap"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className="px-4 py-2 text-sm font-medium text-white bg-[#1e3a8a] hover:bg-[#1e40af] disabled:opacity-60 rounded-md transition-colors cursor-pointer whitespace-nowrap"
+              >
+                {isSubmitting
+                  ? 'Saving...'
+                  : isEditing
+                    ? 'Save Changes'
+                    : 'Save Client'}
+              </button>
+            </div>
           </div>
         </form>
       </div>

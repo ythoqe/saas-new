@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { BookOpen, Printer, Search } from 'lucide-react';
+import { BookOpen, Printer, RotateCcw, Search } from 'lucide-react';
 import type {
   ClientLedgerEntry,
   ClientRecord,
@@ -21,6 +21,7 @@ interface LedgerBookViewProps {
   isLoading: boolean;
   onOpenLedger: (client: ClientRecord) => void;
   onPrintInvoiceEntry: (entry: ClientLedgerEntry) => void;
+  onCorrectLedgerEntry: (entry: ClientLedgerEntry) => void;
 }
 
 export function LedgerBookView({
@@ -29,6 +30,7 @@ export function LedgerBookView({
   isLoading,
   onOpenLedger,
   onPrintInvoiceEntry,
+  onCorrectLedgerEntry,
 }: LedgerBookViewProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
@@ -167,11 +169,11 @@ export function LedgerBookView({
                 <tr className="bg-slate-50/90 border-b border-slate-200 text-xs font-medium text-slate-600">
                   <th className="py-3 px-5">Date</th>
                   <th className="py-3 px-4">Client</th>
-                  <th className="py-3 px-4">Type & Reference</th>
+                  <th className="py-3 px-4">Type &amp; Reference</th>
                   <th className="py-3 px-4">Note</th>
                   <th className="py-3 px-4 text-right">Debit</th>
                   <th className="py-3 px-4 text-right">Credit</th>
-                  <th className="py-3 px-5 text-right">Action</th>
+                  <th className="py-3 px-5 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200 text-sm">
@@ -227,22 +229,30 @@ export function LedgerBookView({
                           <span className="text-slate-400">—</span>
                         )}
                       </td>
-                      <td className="py-3 px-5 text-right whitespace-nowrap">
-                        {entry.txn_type === 'invoice' ? (
+                      <td
+                        className="py-3 px-5 text-right whitespace-nowrap"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <div className="inline-flex items-center justify-end gap-1.5">
+                          {entry.txn_type === 'invoice' ? (
+                            <button
+                              type="button"
+                              onClick={() => onPrintInvoiceEntry(entry)}
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-[#1e3a8a] bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded transition-colors cursor-pointer whitespace-nowrap"
+                            >
+                              <Printer className="w-3.5 h-3.5 shrink-0" />
+                              Print Invoice
+                            </button>
+                          ) : null}
                           <button
                             type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onPrintInvoiceEntry(entry);
-                            }}
-                            className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-[#1e3a8a] bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded transition-colors cursor-pointer whitespace-nowrap"
+                            onClick={() => onCorrectLedgerEntry(entry)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded transition-colors cursor-pointer whitespace-nowrap"
                           >
-                            <Printer className="w-3.5 h-3.5 shrink-0" />
-                            Print Invoice
+                            <RotateCcw className="w-3.5 h-3.5 shrink-0" />
+                            Correct / Adjust
                           </button>
-                        ) : (
-                          <span className="text-xs text-slate-300">—</span>
-                        )}
+                        </div>
                       </td>
                     </tr>
                   );

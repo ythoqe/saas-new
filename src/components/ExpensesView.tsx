@@ -7,6 +7,7 @@ import {
   Layers,
   Plus,
   Receipt,
+  RotateCcw,
   Search,
   TrendingDown,
 } from 'lucide-react';
@@ -18,6 +19,7 @@ import {
   type ExpenseCategory,
   type ExpensePaymentMethod,
   type ExpenseRecord,
+  type MoneyOutRecord,
 } from '../types/mill';
 import {
   formatCurrency,
@@ -30,6 +32,7 @@ import {
 interface ExpensesViewProps {
   ownerId: string;
   expenses: ExpenseRecord[];
+  moneyOutRecords: MoneyOutRecord[];
   isLoading: boolean;
   focusFormSignal: number;
   onExpenseCreated: (
@@ -38,6 +41,7 @@ interface ExpensesViewProps {
     amount: number,
     paymentMethod: ExpensePaymentMethod
   ) => void;
+  onCorrectMoneyOut: (record: MoneyOutRecord) => void;
 }
 
 const CATEGORY_BADGE_CLASSES: Record<ExpenseCategory, string> = {
@@ -69,9 +73,11 @@ function getIsoDateFallbackMs(isoDate: string): number {
 export function ExpensesView({
   ownerId,
   expenses,
+  moneyOutRecords,
   isLoading,
   focusFormSignal,
   onExpenseCreated,
+  onCorrectMoneyOut,
 }: ExpensesViewProps) {
   const todayIso = getTodayIsoDate();
   const currentYearMonth = todayIso.slice(0, 7);
@@ -774,51 +780,75 @@ export function ExpensesView({
                       <th className="py-3 px-4">Category</th>
                       <th className="py-3 px-4">Description / Note</th>
                       <th className="py-3 px-4">Method</th>
-                      <th className="py-3 px-5 text-right">Amount</th>
+                      <th className="py-3 px-4 text-right">Amount</th>
+                      <th className="py-3 px-5 text-right">Action</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-200 text-sm">
-                    {filteredExpenses.map((exp) => (
-                      <tr
-                        key={exp.id}
-                        className="hover:bg-slate-50/80 transition-colors"
-                      >
-                        <td className="py-3.5 px-5 whitespace-nowrap">
-                          <p className="font-mono text-xs font-semibold text-slate-900">
-                            {exp.reference}
-                          </p>
-                          <p className="text-xs text-slate-500 mt-0.5">
-                            {formatIsoDate(exp.expenseDate)}
-                          </p>
-                        </td>
-                        <td className="py-3.5 px-4 whitespace-nowrap">
-                          <span
-                            className={`inline-flex items-center px-2.5 py-0.5 text-xs font-medium rounded border ${
-                              CATEGORY_BADGE_CLASSES[exp.category] ??
-                              'bg-slate-100 text-slate-700 border-slate-200'
-                            }`}
-                          >
-                            {exp.category}
-                          </span>
-                        </td>
-                        <td className="py-3.5 px-4 text-xs text-slate-600 max-w-xs break-words">
-                          {exp.description || '—'}
-                        </td>
-                        <td className="py-3.5 px-4 whitespace-nowrap">
-                          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-700">
-                            {exp.paymentMethod === 'Bank' ? (
-                              <Building2 className="w-3.5 h-3.5 text-slate-400" />
+                    {filteredExpenses.map((exp) => {
+                      const linkedMoneyOut =
+                        moneyOutRecords.find(
+                          (m) =>
+                            m.id === exp.moneyOutId ||
+                            m.expenseId === exp.id ||
+                            m.reference === exp.reference
+                        ) ?? null;
+                      return (
+                        <tr
+                          key={exp.id}
+                          className="hover:bg-slate-50/80 transition-colors"
+                        >
+                          <td className="py-3.5 px-5 whitespace-nowrap">
+                            <p className="font-mono text-xs font-semibold text-slate-900">
+                              {exp.reference}
+                            </p>
+                            <p className="text-xs text-slate-500 mt-0.5">
+                              {formatIsoDate(exp.expenseDate)}
+                            </p>
+                          </td>
+                          <td className="py-3.5 px-4 whitespace-nowrap">
+                            <span
+                              className={`inline-flex items-center px-2.5 py-0.5 text-xs font-medium rounded border ${
+                                CATEGORY_BADGE_CLASSES[exp.category] ??
+                                'bg-slate-100 text-slate-700 border-slate-200'
+                              }`}
+                            >
+                              {exp.category}
+                            </span>
+                          </td>
+                          <td className="py-3.5 px-4 text-xs text-slate-600 max-w-xs break-words">
+                            {exp.description || '—'}
+                          </td>
+                          <td className="py-3.5 px-4 whitespace-nowrap">
+                            <span className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-700">
+                              {exp.paymentMethod === 'Bank' ? (
+                                <Building2 className="w-3.5 h-3.5 text-slate-400" />
+                              ) : (
+                                <Banknote className="w-3.5 h-3.5 text-slate-400" />
+                              )}
+                              {exp.paymentMethod}
+                            </span>
+                          </td>
+                          <td className="py-3.5 px-4 text-right font-mono text-sm font-semibold tabular-nums text-red-700 whitespace-nowrap">
+                            −{formatCurrency(exp.amount)}
+                          </td>
+                          <td className="py-3.5 px-5 text-right whitespace-nowrap">
+                            {linkedMoneyOut ? (
+                              <button
+                                type="button"
+                                onClick={() => onCorrectMoneyOut(linkedMoneyOut)}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded transition-colors cursor-pointer whitespace-nowrap"
+                              >
+                                <RotateCcw className="w-3.5 h-3.5 shrink-0" />
+                                Correct / Adjust
+                              </button>
                             ) : (
-                              <Banknote className="w-3.5 h-3.5 text-slate-400" />
+                              <span className="text-xs text-slate-400">—</span>
                             )}
-                            {exp.paymentMethod}
-                          </span>
-                        </td>
-                        <td className="py-3.5 px-5 text-right font-mono text-sm font-semibold tabular-nums text-red-700 whitespace-nowrap">
-                          −{formatCurrency(exp.amount)}
-                        </td>
-                      </tr>
-                    ))}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

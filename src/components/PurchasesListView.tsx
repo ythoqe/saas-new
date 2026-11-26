@@ -1,5 +1,7 @@
 import { useMemo, useState } from 'react';
-import { Package, Plus, Search } from 'lucide-react';
+import { doc, serverTimestamp, updateDoc } from 'firebase/firestore';
+import { CheckCircle2, Edit2, Lock, Package, Plus, Search, Trash2 } from 'lucide-react';
+import { db, handleFirestoreError, OperationType } from '../firebase';
 import {
   PURCHASE_UNITS,
   type PurchaseRecord,
@@ -21,7 +23,10 @@ interface PurchasesListViewProps {
   summariesBySupplierId: Map<string, SupplierWithLedgerSummary>;
   isLoading: boolean;
   onCreateNewPurchase: () => void;
+  onEditPurchase: (purchase: PurchaseRecord) => void;
+  onDeletePurchase: (purchase: PurchaseRecord) => void;
   onOpenSupplierLedger: (supplier: SupplierRecord) => void;
+  onStatusUpdated: (message: string) => void;
 }
 
 export function PurchasesListView({
@@ -30,10 +35,15 @@ export function PurchasesListView({
   summariesBySupplierId,
   isLoading,
   onCreateNewPurchase,
+  onEditPurchase,
+  onDeletePurchase,
   onOpenSupplierLedger,
+  onStatusUpdated,
 }: PurchasesListViewProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [unitFilter, setUnitFilter] = useState<string>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'Pending' | 'Paid'>('all');
+  const [updatingPurchaseId, setUpdatingPurchaseId] = useState<string | null>(null);
 
   const stats = useMemo(() => {
     let totalSpend = 0;
@@ -64,6 +74,10 @@ export function PurchasesListView({
         return timeB - timeA;
       })
       .filter((p) => {
+        const effectiveStatus = p.status === 'Paid' ? 'Paid' : 'Pending';
+        if (statusFilter !== 'all' && effectiveStatus !== statusFilter) {
+          return false;
+        }
         if (unitFilter !== 'all' && p.unit !== (unitFilter as PurchaseUnit)) {
           return false;
         }
@@ -77,7 +91,29 @@ export function PurchasesListView({
           (supplier?.companyName.toLowerCase().includes(q) ?? false)
         );
       });
-  }, [purchases, suppliersById, searchQuery, unitFilter]);
+  }, [purchases, suppliersById, searchQuery, unitFilter, statusFilter]);
+
+  const handleMarkPaid = async (purchase: PurchaseRecord) => {
+    if (purchase.status === 'Paid') return;
+    setUpdatingPurchaseId(purchase.id);
+    try {
+      await updateDoc(doc(db, 'purchases', purchase.id), {
+        status: 'Paid',
+        updatedAt: serverTimestamp(),
+      });
+      onStatusUpdated(
+        `Marked purchase ${purchase.reference} (${purchase.itemName}) as Paid. Editing and deletion are now locked.`
+      );
+    } catch (error) {
+      handleFirestoreError(
+        error,
+        OperationType.UPDATE,
+        `purchases/${purchase.id}`
+      );
+    } finally {
+      setUpdatingPurchaseId(null);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -139,36 +175,59 @@ export function PurchasesListView({
             />
           </div>
 
-          <div
-            role="group"
-            aria-label="Filter purchases by unit"
-            className="inline-flex items-center gap-1 p-1 bg-slate-100 rounded-md"
-          >
-            <button
-              type="button"
-              onClick={() => setUnitFilter('all')}
-              className={`px-3 py-1 text-xs font-medium rounded transition-colors cursor-pointer whitespace-nowrap ${
-                unitFilter === 'all'
-                  ? 'bg-white text-slate-900 shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
+          <div className="flex flex-wrap items-center gap-2.5">
+            <div
+              role="group"
+              aria-label="Filter purchases by status"
+              className="inline-flex items-center gap-1 p-1 bg-slate-100 rounded-md"
             >
-              All Units
-            </button>
-            {PURCHASE_UNITS.map((u) => (
+              {(['all', 'Pending', 'Paid'] as const).map((st) => (
+                <button
+                  key={st}
+                  type="button"
+                  onClick={() => setStatusFilter(st)}
+                  className={`px-2.5 py-1 text-xs font-medium rounded transition-colors cursor-pointer whitespace-nowrap ${
+                    statusFilter === st
+                      ? 'bg-white text-slate-900 shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  {st === 'all' ? 'All Status' : st}
+                </button>
+              ))}
+            </div>
+
+            <div
+              role="group"
+              aria-label="Filter purchases by unit"
+              className="inline-flex items-center gap-1 p-1 bg-slate-100 rounded-md"
+            >
               <button
-                key={u}
                 type="button"
-                onClick={() => setUnitFilter(u)}
+                onClick={() => setUnitFilter('all')}
                 className={`px-3 py-1 text-xs font-medium rounded transition-colors cursor-pointer whitespace-nowrap ${
-                  unitFilter === u
+                  unitFilter === 'all'
                     ? 'bg-white text-slate-900 shadow-xs'
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                {u}
+                All Units
               </button>
-            ))}
+              {PURCHASE_UNITS.map((u) => (
+                <button
+                  key={u}
+                  type="button"
+                  onClick={() => setUnitFilter(u)}
+                  className={`px-3 py-1 text-xs font-medium rounded transition-colors cursor-pointer whitespace-nowrap ${
+                    unitFilter === u
+                      ? 'bg-white text-slate-900 shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  {u}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
@@ -213,6 +272,7 @@ export function PurchasesListView({
               onClick={() => {
                 setSearchQuery('');
                 setUnitFilter('all');
+                setStatusFilter('all');
               }}
               className="mt-4 px-3.5 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-md transition-colors cursor-pointer"
             >
@@ -229,13 +289,16 @@ export function PurchasesListView({
                   <th className="py-3 px-4">Item Name</th>
                   <th className="py-3 px-4 text-right">Quantity</th>
                   <th className="py-3 px-4 text-right">Rate</th>
-                  <th className="py-3 px-5 text-right">Total Amount</th>
+                  <th className="py-3 px-4 text-right">Total Amount</th>
+                  <th className="py-3 px-4">Status</th>
+                  <th className="py-3 px-5 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200 text-sm">
                 {sortedAndFiltered.map((p) => {
                   const supplier = suppliersById.get(p.supplierId);
                   const summary = summariesBySupplierId.get(p.supplierId);
+                  const isPending = p.status !== 'Paid';
                   return (
                     <tr
                       key={p.id}
@@ -286,8 +349,72 @@ export function PurchasesListView({
                       <td className="py-3.5 px-4 text-right font-mono text-xs tabular-nums text-slate-700 whitespace-nowrap">
                         {formatCurrency(p.rate)}/{p.unit}
                       </td>
-                      <td className="py-3.5 px-5 text-right font-mono text-sm font-semibold tabular-nums text-slate-900 whitespace-nowrap">
+                      <td className="py-3.5 px-4 text-right font-mono text-sm font-semibold tabular-nums text-slate-900 whitespace-nowrap">
                         {formatCurrency(p.totalAmount)}
+                      </td>
+                      <td
+                        className="py-3.5 px-4 whitespace-nowrap"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <span
+                          className={`inline-flex items-center px-2.5 py-0.5 text-xs font-medium rounded border ${
+                            isPending
+                              ? 'text-amber-800 bg-amber-50 border-amber-200'
+                              : 'text-emerald-800 bg-emerald-50 border-emerald-200'
+                          }`}
+                        >
+                          {isPending ? 'Pending' : 'Paid'}
+                        </span>
+                      </td>
+                      <td
+                        className="py-3.5 px-5 text-right whitespace-nowrap"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <div className="inline-flex items-center justify-end gap-1.5">
+                          {isPending && (
+                            <button
+                              type="button"
+                              disabled={updatingPurchaseId === p.id}
+                              onClick={() => handleMarkPaid(p)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded transition-colors cursor-pointer whitespace-nowrap disabled:opacity-50"
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                              Mark Paid
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            disabled={!isPending}
+                            onClick={() => onEditPurchase(p)}
+                            aria-label={`Edit purchase ${p.reference}`}
+                            title={
+                              isPending
+                                ? 'Edit Purchase'
+                                : 'Paid purchases are locked and cannot be edited'
+                            }
+                            className="p-1.5 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded-md transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                          >
+                            {isPending ? (
+                              <Edit2 className="w-3.5 h-3.5" />
+                            ) : (
+                              <Lock className="w-3.5 h-3.5" />
+                            )}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={!isPending}
+                            onClick={() => onDeletePurchase(p)}
+                            aria-label={`Delete purchase ${p.reference}`}
+                            title={
+                              isPending
+                                ? 'Delete Purchase'
+                                : 'Paid purchases are locked and cannot be deleted'
+                            }
+                            className="p-1.5 text-slate-500 hover:text-red-700 hover:bg-red-50 rounded-md transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );

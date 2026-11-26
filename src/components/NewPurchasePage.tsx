@@ -230,7 +230,9 @@ export function NewPurchasePage({
         unit: resolvedUnit,
         rate: cleanRate,
         totalAmount: cleanTotal,
+        status: 'Pending',
         createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
       };
 
       const supplierLedgerPayload = {

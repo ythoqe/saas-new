@@ -4,9 +4,12 @@ import {
   BookOpen,
   CheckCircle2,
   ClipboardList,
+  Edit2,
+  Lock,
   Plus,
   Printer,
   Search,
+  Trash2,
   Truck,
 } from 'lucide-react';
 import { db, handleFirestoreError, OperationType } from '../firebase';
@@ -35,6 +38,8 @@ interface OrdersListViewProps {
   summariesByClientId: Map<string, ClientWithLedgerSummary>;
   isLoading: boolean;
   onCreateNewOrder: () => void;
+  onEditOrder: (order: OrderRecord) => void;
+  onDeleteOrder: (order: OrderRecord) => void;
   onStartCompleteDeliver: (order: OrderRecord) => void;
   onOpenClientLedger: (client: ClientRecord) => void;
   onPrintInvoice: (order: OrderRecord) => void;
@@ -48,6 +53,8 @@ export function OrdersListView({
   summariesByClientId,
   isLoading,
   onCreateNewOrder,
+  onEditOrder,
+  onDeleteOrder,
   onStartCompleteDeliver,
   onOpenClientLedger,
   onPrintInvoice,
@@ -463,47 +470,83 @@ export function OrdersListView({
                       </td>
 
                       <td className="py-3.5 px-5 text-right whitespace-nowrap">
-                        {isDelivered ? (
-                          <div className="inline-flex items-center justify-end gap-1.5">
-                            <button
-                              type="button"
-                              onClick={() => onPrintInvoice(order)}
-                              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-white bg-[#1e3a8a] hover:bg-[#1e40af] rounded-md transition-colors cursor-pointer whitespace-nowrap"
-                            >
-                              <Printer className="w-3.5 h-3.5 shrink-0" />
-                              Print Invoice
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => onPrintChallan(order)}
-                              title="Print Delivery Challan (without prices)"
-                              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-md transition-colors cursor-pointer whitespace-nowrap"
-                            >
-                              <Truck className="w-3.5 h-3.5 shrink-0 text-slate-500" />
-                              Challan
-                            </button>
-                            {client ? (
+                        <div className="inline-flex items-center justify-end gap-1.5">
+                          {isDelivered ? (
+                            <>
                               <button
                                 type="button"
-                                onClick={() => onOpenClientLedger(client)}
-                                title="Open client ledger"
-                                className="inline-flex items-center gap-1 px-2 py-1.5 text-xs font-medium text-[#1e3a8a] bg-blue-50/70 hover:bg-blue-100/80 rounded-md transition-colors cursor-pointer whitespace-nowrap"
+                                onClick={() => onPrintInvoice(order)}
+                                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-white bg-[#1e3a8a] hover:bg-[#1e40af] rounded-md transition-colors cursor-pointer whitespace-nowrap"
                               >
-                                <BookOpen className="w-3.5 h-3.5" />
-                                Ledger
+                                <Printer className="w-3.5 h-3.5 shrink-0" />
+                                Print Invoice
                               </button>
-                            ) : null}
-                          </div>
-                        ) : (
+                              <button
+                                type="button"
+                                onClick={() => onPrintChallan(order)}
+                                title="Print Delivery Challan (without prices)"
+                                className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-md transition-colors cursor-pointer whitespace-nowrap"
+                              >
+                                <Truck className="w-3.5 h-3.5 shrink-0 text-slate-500" />
+                                Challan
+                              </button>
+                              {client ? (
+                                <button
+                                  type="button"
+                                  onClick={() => onOpenClientLedger(client)}
+                                  title="Open client ledger"
+                                  className="inline-flex items-center gap-1 px-2 py-1.5 text-xs font-medium text-[#1e3a8a] bg-blue-50/70 hover:bg-blue-100/80 rounded-md transition-colors cursor-pointer whitespace-nowrap"
+                                >
+                                  <BookOpen className="w-3.5 h-3.5" />
+                                  Ledger
+                                </button>
+                              ) : null}
+                            </>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => onStartCompleteDeliver(order)}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-emerald-700 hover:bg-emerald-800 rounded-md transition-colors cursor-pointer whitespace-nowrap"
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                              Complete &amp; Deliver
+                            </button>
+                          )}
+
+                          {/* Edit & Delete — Enabled ONLY when order.status === 'Processing' */}
                           <button
                             type="button"
-                            onClick={() => onStartCompleteDeliver(order)}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-emerald-700 hover:bg-emerald-800 rounded-md transition-colors cursor-pointer whitespace-nowrap"
+                            disabled={order.status !== 'Processing'}
+                            onClick={() => onEditOrder(order)}
+                            aria-label={`Edit order ${order.id}`}
+                            title={
+                              order.status === 'Processing'
+                                ? 'Edit Order'
+                                : 'Only orders in "Processing" status can be edited'
+                            }
+                            className="p-1.5 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded-md transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                           >
-                            <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
-                            Complete &amp; Deliver
+                            {order.status === 'Processing' ? (
+                              <Edit2 className="w-3.5 h-3.5" />
+                            ) : (
+                              <Lock className="w-3.5 h-3.5" />
+                            )}
                           </button>
-                        )}
+                          <button
+                            type="button"
+                            disabled={order.status !== 'Processing'}
+                            onClick={() => onDeleteOrder(order)}
+                            aria-label={`Delete order ${order.id}`}
+                            title={
+                              order.status === 'Processing'
+                                ? 'Delete Order'
+                                : 'Only orders in "Processing" status can be deleted'
+                            }
+                            className="p-1.5 text-slate-500 hover:text-red-700 hover:bg-red-50 rounded-md transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
