@@ -22,7 +22,8 @@ export interface AdversarialTestCase {
     | 'inventory'
     | 'stock_movements'
     | 'employees'
-    | 'employee_advances';
+    | 'employee_advances'
+    | 'salary_payments';
   operation: 'get' | 'list' | 'create' | 'update' | 'delete';
   auth: { uid: string; email_verified: boolean; role?: 'admin' | 'manager' | 'accountant' } | null;
   docId?: string;
@@ -314,6 +315,92 @@ export const dirtyDozenTestCases: AdversarialTestCase[] = [
     docId: 'bootstrap',
     payload: {
       firstAdminUid: 'otherUid',
+    },
+    expected: 'PERMISSION_DENIED',
+  },
+  {
+    id: 21,
+    name: 'Non-admin attempting to create a monthly salary payment (Admin ONLY)',
+    collection: 'salary_payments',
+    operation: 'create',
+    auth: { uid: 'accountantUid', email_verified: true, role: 'accountant' },
+    docId: 'SAL-ACC00001',
+    payload: {
+      ownerId: 'accountantUid',
+      employeeId: 'emp_1',
+      employeeName: 'Karim Mia',
+      department: 'Dyeing',
+      moneyOutId: 'SAL-ACC00001',
+      reference: 'SAL-ACC00001',
+      salaryMonth: '2026-11',
+      paymentDate: '2026-11-27',
+      basicSalary: 15000,
+      overtimeAmount: 1000,
+      bonusAmount: 500,
+      advanceDeduction: 2000,
+      netSalary: 14500,
+      deductedAdvanceCount: 1,
+      paymentMethod: 'Cash',
+      note: 'Unauthorized salary payout',
+    },
+    expected: 'PERMISSION_DENIED',
+  },
+  {
+    id: 22,
+    name: 'Forged netSalary arithmetic on salary_payments create',
+    collection: 'salary_payments',
+    operation: 'create',
+    auth: { uid: 'adminUid', email_verified: true, role: 'admin' },
+    docId: 'SAL-BADMATH1',
+    payload: {
+      ownerId: 'adminUid',
+      employeeId: 'emp_1',
+      employeeName: 'Karim Mia',
+      department: 'Dyeing',
+      moneyOutId: 'SAL-BADMATH1',
+      reference: 'SAL-BADMATH1',
+      salaryMonth: '2026-11',
+      paymentDate: '2026-11-27',
+      basicSalary: 15000,
+      overtimeAmount: 0,
+      bonusAmount: 0,
+      advanceDeduction: 3000,
+      netSalary: 15000,
+      deductedAdvanceCount: 1,
+      paymentMethod: 'Cash',
+      note: 'Skipped advance deduction in netSalary',
+    },
+    expected: 'PERMISSION_DENIED',
+  },
+  {
+    id: 23,
+    name: 'Reverting an already-deducted employee advance back to deducted: false',
+    collection: 'employee_advances',
+    operation: 'update',
+    auth: { uid: 'adminUid', email_verified: true, role: 'admin' },
+    docId: 'ADV-DEDUCTED1',
+    payload: {
+      deducted: false,
+    },
+    expected: 'PERMISSION_DENIED',
+  },
+  {
+    id: 24,
+    name: 'Orphaned SAL-* money_out without atomic salary_payments document',
+    collection: 'money_out',
+    operation: 'create',
+    auth: { uid: 'adminUid', email_verified: true, role: 'admin' },
+    docId: 'SAL-ORPHAN01',
+    payload: {
+      ownerId: 'adminUid',
+      employeeId: 'emp_1',
+      salaryPaymentId: 'SAL-ORPHAN01',
+      category: 'Salary',
+      reference: 'SAL-ORPHAN01',
+      amount: 14500,
+      paymentDate: '2026-11-27',
+      paymentMethod: 'Cash',
+      note: 'Orphaned salary cash out',
     },
     expected: 'PERMISSION_DENIED',
   },

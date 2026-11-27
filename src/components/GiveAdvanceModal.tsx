@@ -141,7 +141,7 @@ export function GiveAdvanceModal({
       const advanceDocRef = doc(db, 'employee_advances', advanceRef);
       const moneyOutDocRef = doc(db, 'money_out', advanceRef);
 
-      // 1. Save immutable weekly advance in employee_advances
+      // 1. Save weekly advance in employee_advances (marked undeducted until salary settlement)
       batch.set(advanceDocRef, {
         ownerId,
         employeeId: employee.id,
@@ -153,6 +153,7 @@ export function GiveAdvanceModal({
         advanceDate,
         paymentMethod,
         note: trimmedNote,
+        deducted: false,
         createdAt: serverTimestamp(),
       });
 

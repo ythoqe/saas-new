@@ -75,7 +75,7 @@ type UnifiedTransaction =
     }
   | {
       kind: 'money_out';
-      subType: 'supplier' | 'expense' | 'advance' | 'adjustment';
+      subType: 'supplier' | 'expense' | 'advance' | 'salary' | 'adjustment';
       id: string;
       rawRecord: MoneyOutRecord;
       reference: string;
@@ -292,6 +292,35 @@ export function DashboardOverview({
           note: rec.note,
           counterpartyId: rec.employeeId || rec.id,
           counterpartyName: advanceLabel,
+          sortTimestamp:
+            timestampToDate(rec.createdAt)?.getTime() ??
+            getIsoDateFallbackMs(rec.paymentDate),
+        };
+      }
+
+      const isSalary =
+        rec.source === 'salary' ||
+        rec.reference.startsWith('SAL-') ||
+        Boolean(rec.salaryPaymentId);
+      if (isSalary) {
+        const employee = rec.employeeId
+          ? employeesById.get(rec.employeeId)
+          : undefined;
+        const salaryLabel = employee
+          ? `Salary — ${employee.name}`
+          : rec.note || 'Employee Salary';
+        return {
+          kind: 'money_out',
+          subType: 'salary',
+          id: `out-${rec.id}`,
+          rawRecord: rec,
+          reference: rec.reference || rec.id,
+          amount: rec.amount,
+          paymentDate: rec.paymentDate,
+          paymentMethod: rec.paymentMethod,
+          note: rec.note,
+          counterpartyId: rec.employeeId || rec.id,
+          counterpartyName: salaryLabel,
           sortTimestamp:
             timestampToDate(rec.createdAt)?.getTime() ??
             getIsoDateFallbackMs(rec.paymentDate),
@@ -764,6 +793,8 @@ export function DashboardOverview({
                   txn.kind === 'money_out' && txn.subType === 'expense';
                 const isAdvance =
                   txn.kind === 'money_out' && txn.subType === 'advance';
+                const isSalary =
+                  txn.kind === 'money_out' && txn.subType === 'salary';
                 const isAdjustment =
                   txn.reference.startsWith('REV-') ||
                   (txn.kind === 'money_out' && txn.subType === 'adjustment');
@@ -771,7 +802,11 @@ export function DashboardOverview({
                   ? clientsById.get(txn.counterpartyId)
                   : undefined;
                 const supplier =
-                  !isMoneyIn && !isExpense && !isAdvance && !isAdjustment
+                  !isMoneyIn &&
+                  !isExpense &&
+                  !isAdvance &&
+                  !isSalary &&
+                  !isAdjustment
                     ? suppliersById.get(txn.counterpartyId)
                     : undefined;
 
@@ -785,7 +820,7 @@ export function DashboardOverview({
                       onClick={() => {
                         if (isMoneyIn && client) {
                           onOpenClientPayments(client);
-                        } else if (isAdvance) {
+                        } else if (isAdvance || isSalary) {
                           if (canSeeEmployees) {
                             onNavigate('employees');
                           }
@@ -826,11 +861,13 @@ export function DashboardOverview({
                                 : t('dashboard.txn.reversalOut')
                               : isMoneyIn
                                 ? t('dashboard.txn.moneyIn')
-                                : isAdvance
-                                  ? t('dashboard.txn.advanceOut')
-                                  : isExpense
-                                    ? t('dashboard.txn.expenseOut')
-                                    : t('dashboard.txn.moneyOut')}
+                                : isSalary
+                                  ? t('dashboard.txn.salaryOut')
+                                  : isAdvance
+                                    ? t('dashboard.txn.advanceOut')
+                                    : isExpense
+                                      ? t('dashboard.txn.expenseOut')
+                                      : t('dashboard.txn.moneyOut')}
                           </span>{' '}
                           · {translatePaymentMethod(txn.paymentMethod)} ·{' '}
                           {formatIsoDate(txn.paymentDate)}

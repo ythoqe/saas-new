@@ -425,7 +425,7 @@
     },
     "MoneyOutRecord": {
       "title": "MoneyOutRecord",
-      "description": "An immutable cash/bank outflow record created atomically alongside a supplier_ledger payment debit entry (SPAY-*), a factory expense record (EXP-*), an employee weekly advance (ADV-*), or a cash reversal adjustment (REV-*).",
+      "description": "An immutable cash/bank outflow record created atomically alongside a supplier_ledger payment debit entry (SPAY-*), a factory expense record (EXP-*), an employee weekly advance (ADV-*), a monthly employee salary payment (SAL-*), or a cash reversal adjustment (REV-*).",
       "type": "object",
       "properties": {
         "ownerId": {
@@ -436,7 +436,7 @@
         },
         "source": {
           "type": "string",
-          "enum": ["supplier", "expense", "advance", "adjustment"]
+          "enum": ["supplier", "expense", "advance", "salary", "adjustment"]
         },
         "supplierId": {
           "type": "string",
@@ -468,6 +468,12 @@
           "maxLength": 128,
           "pattern": "^[a-zA-Z0-9_\\-]+$"
         },
+        "salaryPaymentId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
         "category": {
           "type": "string",
           "enum": [
@@ -486,7 +492,7 @@
           "type": "string",
           "minLength": 5,
           "maxLength": 80,
-          "pattern": "^(SPAY|EXP|ADV|REV)-[a-zA-Z0-9_\\-]+$"
+          "pattern": "^(SPAY|EXP|ADV|SAL|REV)-[a-zA-Z0-9_\\-]+$"
         },
         "amount": {
           "type": "number"
@@ -825,6 +831,19 @@
           "minLength": 0,
           "maxLength": 300
         },
+        "deducted": {
+          "type": "boolean"
+        },
+        "deductedBySalaryId": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 80,
+          "pattern": "^SAL-[a-zA-Z0-9_\\-]+$"
+        },
+        "deductedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
         "createdAt": {
           "type": "string",
           "format": "date-time"
@@ -839,6 +858,108 @@
         "reference",
         "amount",
         "advanceDate",
+        "paymentMethod",
+        "note",
+        "createdAt"
+      ]
+    },
+    "SalaryPayment": {
+      "title": "SalaryPayment",
+      "description": "An immutable monthly employee salary settlement record computing Net Salary = Basic + Overtime + Bonus - Advance Deduction, atomically creating a money_out outflow (category Salary, reference SAL-*) and marking deducted advances.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "employeeId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "employeeName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "department": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "moneyOutId": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 128
+        },
+        "reference": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 80,
+          "pattern": "^SAL-[a-zA-Z0-9_\\-]+$"
+        },
+        "salaryMonth": {
+          "type": "string",
+          "minLength": 7,
+          "maxLength": 7,
+          "pattern": "^[0-9]{4}-[0-9]{2}$"
+        },
+        "paymentDate": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 10,
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "basicSalary": {
+          "type": "number"
+        },
+        "overtimeAmount": {
+          "type": "number"
+        },
+        "bonusAmount": {
+          "type": "number"
+        },
+        "advanceDeduction": {
+          "type": "number"
+        },
+        "netSalary": {
+          "type": "number"
+        },
+        "deductedAdvanceCount": {
+          "type": "number"
+        },
+        "paymentMethod": {
+          "type": "string",
+          "enum": ["Cash", "Bank"]
+        },
+        "note": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 300
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "ownerId",
+        "employeeId",
+        "employeeName",
+        "department",
+        "moneyOutId",
+        "reference",
+        "salaryMonth",
+        "paymentDate",
+        "basicSalary",
+        "overtimeAmount",
+        "bonusAmount",
+        "advanceDeduction",
+        "netSalary",
+        "deductedAdvanceCount",
         "paymentMethod",
         "note",
         "createdAt"
@@ -969,7 +1090,11 @@
     },
     "/employee_advances/{advanceId}": {
       "schema": { "$ref": "#/entities/EmployeeAdvance" },
-      "description": "Append-only weekly advance log per employee restricted to admin."
+      "description": "Weekly advance log per employee restricted to admin. Immutable except for a one-way atomic transition marking deducted=true when settled by a salary_payments document."
+    },
+    "/salary_payments/{salaryId}": {
+      "schema": { "$ref": "#/entities/SalaryPayment" },
+      "description": "Append-only monthly employee salary payment records restricted to admin, atomically linked to money_out (SAL-*) and deducted employee_advances."
     }
   }
 }

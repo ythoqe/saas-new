@@ -647,6 +647,56 @@ service cloud.firestore {
         && data.createdAt is timestamp;
     }
 
+    // Validation Blueprint: MoneyOutRecord (Monthly Employee Salary Payment Outflow)
+    function isValidSalaryMoneyOut(data) {
+      return data.keys().hasAll([
+          'ownerId',
+          'employeeId',
+          'salaryPaymentId',
+          'category',
+          'reference',
+          'amount',
+          'paymentDate',
+          'paymentMethod',
+          'note',
+          'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId',
+          'employeeId',
+          'salaryPaymentId',
+          'category',
+          'reference',
+          'amount',
+          'paymentDate',
+          'paymentMethod',
+          'note',
+          'createdAt'
+        ])
+        && isValidId(data.ownerId)
+        && data.ownerId == request.auth.uid
+        && isValidId(data.employeeId)
+        && isValidId(data.salaryPaymentId)
+        && data.category is string
+        && data.category.size() == 6
+        && data.category == 'Salary'
+        && data.reference is string
+        && data.reference.size() >= 5
+        && data.reference.size() <= 80
+        && data.reference.matches('^SAL-[a-zA-Z0-9_\\-]+$')
+        && isPositiveBoundedNumber(data.amount, 1000000000)
+        && data.paymentDate is string
+        && data.paymentDate.size() == 10
+        && data.paymentDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && data.paymentMethod is string
+        && data.paymentMethod.size() >= 1
+        && data.paymentMethod.size() <= 20
+        && data.paymentMethod in ['Cash', 'Bank']
+        && data.note is string
+        && data.note.size() <= 300
+        && data.createdAt is timestamp;
+    }
+
     // Validation Blueprint: MoneyOutRecord (Append-Only Cash Reversal Adjustment)
     function isValidAdjustmentMoneyOut(data) {
       return data.keys().hasAll([
@@ -897,10 +947,12 @@ service cloud.firestore {
           'advanceDate',
           'paymentMethod',
           'note',
-          'createdAt'
+          'createdAt',
+          'deducted',
+          'deductedBySalaryId',
+          'deductedAt'
         ])
         && isValidId(data.ownerId)
-        && data.ownerId == request.auth.uid
         && isValidId(data.employeeId)
         && data.employeeName is string
         && data.employeeName.size() >= 1
@@ -917,6 +969,94 @@ service cloud.firestore {
         && data.advanceDate is string
         && data.advanceDate.size() == 10
         && data.advanceDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && data.paymentMethod is string
+        && data.paymentMethod.size() >= 1
+        && data.paymentMethod.size() <= 20
+        && data.paymentMethod in ['Cash', 'Bank']
+        && data.note is string
+        && data.note.size() <= 300
+        && data.createdAt is timestamp
+        && (!('deducted' in data) || data.deducted is bool)
+        && (!('deductedBySalaryId' in data) || (
+          data.deductedBySalaryId is string
+          && data.deductedBySalaryId.size() >= 5
+          && data.deductedBySalaryId.size() <= 80
+          && data.deductedBySalaryId.matches('^SAL-[a-zA-Z0-9_\\-]+$')
+        ))
+        && (!('deductedAt' in data) || data.deductedAt is timestamp);
+    }
+
+    // Validation Blueprint: SalaryPayment entity
+    function isValidSalaryPayment(data) {
+      return data.keys().hasAll([
+          'ownerId',
+          'employeeId',
+          'employeeName',
+          'department',
+          'moneyOutId',
+          'reference',
+          'salaryMonth',
+          'paymentDate',
+          'basicSalary',
+          'overtimeAmount',
+          'bonusAmount',
+          'advanceDeduction',
+          'netSalary',
+          'deductedAdvanceCount',
+          'paymentMethod',
+          'note',
+          'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId',
+          'employeeId',
+          'employeeName',
+          'department',
+          'moneyOutId',
+          'reference',
+          'salaryMonth',
+          'paymentDate',
+          'basicSalary',
+          'overtimeAmount',
+          'bonusAmount',
+          'advanceDeduction',
+          'netSalary',
+          'deductedAdvanceCount',
+          'paymentMethod',
+          'note',
+          'createdAt'
+        ])
+        && isValidId(data.ownerId)
+        && data.ownerId == request.auth.uid
+        && isValidId(data.employeeId)
+        && data.employeeName is string
+        && data.employeeName.size() >= 1
+        && data.employeeName.size() <= 120
+        && data.department is string
+        && data.department.size() >= 1
+        && data.department.size() <= 60
+        && data.moneyOutId is string
+        && data.moneyOutId.size() <= 128
+        && (data.moneyOutId == '' || isValidId(data.moneyOutId))
+        && data.reference is string
+        && data.reference.size() >= 5
+        && data.reference.size() <= 80
+        && data.reference.matches('^SAL-[a-zA-Z0-9_\\-]+$')
+        && data.salaryMonth is string
+        && data.salaryMonth.size() == 7
+        && data.salaryMonth.matches('^[0-9]{4}-[0-9]{2}$')
+        && data.paymentDate is string
+        && data.paymentDate.size() == 10
+        && data.paymentDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && isPositiveBoundedNumber(data.basicSalary, 100000000)
+        && isNonNegativeBoundedNumber(data.overtimeAmount, 100000000)
+        && isNonNegativeBoundedNumber(data.bonusAmount, 100000000)
+        && isNonNegativeBoundedNumber(data.advanceDeduction, 1000000000)
+        && isNonNegativeBoundedNumber(data.netSalary, 1000000000)
+        && math.abs(data.netSalary - (data.basicSalary + data.overtimeAmount + data.bonusAmount - data.advanceDeduction)) <= 0.02
+        && data.deductedAdvanceCount is int
+        && data.deductedAdvanceCount >= 0
+        && data.deductedAdvanceCount <= 500
         && data.paymentMethod is string
         && data.paymentMethod.size() >= 1
         && data.paymentMethod.size() <= 20
@@ -1381,6 +1521,21 @@ service cloud.firestore {
             && getAfter(/databases/$(database)/documents/employee_advances/$(paymentId)).data.advanceDate == incoming().paymentDate
             && getAfter(/databases/$(database)/documents/employee_advances/$(paymentId)).data.paymentMethod == incoming().paymentMethod
           ) || (
+            isValidSalaryMoneyOut(incoming())
+            && incoming().salaryPaymentId == paymentId
+            && incoming().reference == paymentId
+            && incoming().createdAt == request.time
+            && isAdmin()
+            && exists(/databases/$(database)/documents/employees/$(incoming().employeeId))
+            && existsAfter(/databases/$(database)/documents/salary_payments/$(paymentId))
+            && getAfter(/databases/$(database)/documents/salary_payments/$(paymentId)).data.ownerId == request.auth.uid
+            && getAfter(/databases/$(database)/documents/salary_payments/$(paymentId)).data.employeeId == incoming().employeeId
+            && getAfter(/databases/$(database)/documents/salary_payments/$(paymentId)).data.moneyOutId == paymentId
+            && getAfter(/databases/$(database)/documents/salary_payments/$(paymentId)).data.reference == paymentId
+            && getAfter(/databases/$(database)/documents/salary_payments/$(paymentId)).data.netSalary == incoming().amount
+            && getAfter(/databases/$(database)/documents/salary_payments/$(paymentId)).data.paymentDate == incoming().paymentDate
+            && getAfter(/databases/$(database)/documents/salary_payments/$(paymentId)).data.paymentMethod == incoming().paymentMethod
+          ) || (
             isValidAdjustmentMoneyOut(incoming())
             && incoming().reference == paymentId
             && incoming().createdAt == request.time
@@ -1526,7 +1681,7 @@ service cloud.firestore {
         && isAdmin();
     }
 
-    // Collection: /employee_advances/{advanceId} (Strictly Admin ONLY — Append-Only Immutable)
+    // Collection: /employee_advances/{advanceId} (Strictly Admin ONLY — Immutable except one-way atomic salary deduction lock)
     match /employee_advances/{advanceId} {
       allow get: if isVerifiedUser()
         && isValidId(advanceId)
@@ -1537,9 +1692,13 @@ service cloud.firestore {
       allow create: if isVerifiedUser()
         && isValidId(advanceId)
         && isValidEmployeeAdvance(incoming())
+        && incoming().ownerId == request.auth.uid
         && incoming().moneyOutId == advanceId
         && incoming().reference == advanceId
         && incoming().createdAt == request.time
+        && (!('deducted' in incoming()) || incoming().deducted == false)
+        && !('deductedBySalaryId' in incoming())
+        && !('deductedAt' in incoming())
         && isAdmin()
         && exists(/databases/$(database)/documents/employees/$(incoming().employeeId))
         && existsAfter(/databases/$(database)/documents/money_out/$(advanceId))
@@ -1551,6 +1710,72 @@ service cloud.firestore {
         && getAfter(/databases/$(database)/documents/money_out/$(advanceId)).data.amount == incoming().amount
         && getAfter(/databases/$(database)/documents/money_out/$(advanceId)).data.paymentDate == incoming().advanceDate
         && getAfter(/databases/$(database)/documents/money_out/$(advanceId)).data.paymentMethod == incoming().paymentMethod;
+
+      allow update: if isVerifiedUser()
+        && isValidId(advanceId)
+        && isValidEmployeeAdvance(incoming())
+        && isAdmin()
+        && (!('deducted' in existing()) || existing().deducted == false)
+        && incoming().ownerId == existing().ownerId
+        && incoming().employeeId == existing().employeeId
+        && incoming().employeeName == existing().employeeName
+        && incoming().department == existing().department
+        && incoming().moneyOutId == existing().moneyOutId
+        && incoming().reference == existing().reference
+        && incoming().amount == existing().amount
+        && incoming().advanceDate == existing().advanceDate
+        && incoming().paymentMethod == existing().paymentMethod
+        && incoming().note == existing().note
+        && incoming().createdAt == existing().createdAt
+        && incoming().deducted == true
+        && 'deductedBySalaryId' in incoming()
+        && 'deductedAt' in incoming()
+        && incoming().deductedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'deducted',
+          'deductedBySalaryId',
+          'deductedAt'
+        ])
+        && existsAfter(/databases/$(database)/documents/salary_payments/$(incoming().deductedBySalaryId))
+        && getAfter(/databases/$(database)/documents/salary_payments/$(incoming().deductedBySalaryId)).data.ownerId == request.auth.uid
+        && getAfter(/databases/$(database)/documents/salary_payments/$(incoming().deductedBySalaryId)).data.employeeId == existing().employeeId;
+
+      allow delete: if false;
+    }
+
+    // Collection: /salary_payments/{salaryId} (Strictly Admin ONLY — Append-Only Immutable)
+    match /salary_payments/{salaryId} {
+      allow get: if isVerifiedUser()
+        && isValidId(salaryId)
+        && isAdmin();
+
+      allow list: if isAdmin();
+
+      allow create: if isVerifiedUser()
+        && isValidId(salaryId)
+        && isValidSalaryPayment(incoming())
+        && incoming().reference == salaryId
+        && incoming().createdAt == request.time
+        && isAdmin()
+        && exists(/databases/$(database)/documents/employees/$(incoming().employeeId))
+        && (
+          (
+            incoming().netSalary > 0
+            && incoming().moneyOutId == salaryId
+            && existsAfter(/databases/$(database)/documents/money_out/$(salaryId))
+            && getAfter(/databases/$(database)/documents/money_out/$(salaryId)).data.ownerId == request.auth.uid
+            && getAfter(/databases/$(database)/documents/money_out/$(salaryId)).data.employeeId == incoming().employeeId
+            && getAfter(/databases/$(database)/documents/money_out/$(salaryId)).data.salaryPaymentId == salaryId
+            && getAfter(/databases/$(database)/documents/money_out/$(salaryId)).data.category == 'Salary'
+            && getAfter(/databases/$(database)/documents/money_out/$(salaryId)).data.reference == salaryId
+            && getAfter(/databases/$(database)/documents/money_out/$(salaryId)).data.amount == incoming().netSalary
+            && getAfter(/databases/$(database)/documents/money_out/$(salaryId)).data.paymentDate == incoming().paymentDate
+            && getAfter(/databases/$(database)/documents/money_out/$(salaryId)).data.paymentMethod == incoming().paymentMethod
+          ) || (
+            incoming().netSalary == 0
+            && incoming().moneyOutId == ''
+          )
+        );
 
       allow update: if false;
       allow delete: if false;

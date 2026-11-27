@@ -52,6 +52,7 @@ import {
 import { NewOrderPage } from './components/NewOrderPage';
 import { NewPurchasePage } from './components/NewPurchasePage';
 import { OrdersListView } from './components/OrdersListView';
+import { PaySalaryModal } from './components/PaySalaryModal';
 import { PaySupplierModal } from './components/PaySupplierModal';
 import { PurchasesListView } from './components/PurchasesListView';
 import { ReceivePaymentModal } from './components/ReceivePaymentModal';
@@ -82,6 +83,8 @@ import type {
   NavSection,
   OrderRecord,
   PurchaseRecord,
+  SalaryPaymentMethod,
+  SalaryPaymentRecord,
   StockMovementRecord,
   StockMovementType,
   SupplierLedgerEntry,
@@ -149,6 +152,9 @@ function MillDashboardShell() {
   const [employeeAdvances, setEmployeeAdvances] = useState<
     EmployeeAdvanceRecord[]
   >([]);
+  const [salaryPayments, setSalaryPayments] = useState<SalaryPaymentRecord[]>(
+    []
+  );
 
   const [clientsLoaded, setClientsLoaded] = useState(false);
   const [ledgerLoaded, setLedgerLoaded] = useState(false);
@@ -163,6 +169,7 @@ function MillDashboardShell() {
   const [stockMovementsLoaded, setStockMovementsLoaded] = useState(false);
   const [employeesLoaded, setEmployeesLoaded] = useState(false);
   const [employeeAdvancesLoaded, setEmployeeAdvancesLoaded] = useState(false);
+  const [salaryPaymentsLoaded, setSalaryPaymentsLoaded] = useState(false);
   const [usersLoaded, setUsersLoaded] = useState(false);
   const [fatalError, setFatalError] = useState<Error | null>(null);
 
@@ -195,6 +202,9 @@ function MillDashboardShell() {
   // Employee drawers/modals
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null);
   const [givingAdvanceEmployeeId, setGivingAdvanceEmployeeId] = useState<
+    string | null
+  >(null);
+  const [payingSalaryEmployeeId, setPayingSalaryEmployeeId] = useState<
     string | null
   >(null);
 
@@ -245,6 +255,9 @@ function MillDashboardShell() {
         setStockMovements([]);
         setEmployees([]);
         setEmployeeAdvances([]);
+        setSalaryPayments([]);
+        setSalaryPaymentsLoaded(false);
+        setPayingSalaryEmployeeId(null);
         setClientsLoaded(false);
         setLedgerLoaded(false);
         setOrdersLoaded(false);
@@ -745,13 +758,18 @@ function MillDashboardShell() {
                 const refStr = String(data.reference ?? '');
                 const isAdjustment =
                   data.source === 'adjustment' || refStr.startsWith('REV-');
+                const isSalary =
+                  !isAdjustment &&
+                  (Boolean(data.salaryPaymentId) || refStr.startsWith('SAL-'));
                 const isAdvance =
                   !isAdjustment &&
+                  !isSalary &&
                   (Boolean(data.advanceId) ||
                     refStr.startsWith('ADV-') ||
                     String(data.category ?? '') === 'Employee Advance');
                 const isExpense =
                   !isAdjustment &&
+                  !isSalary &&
                   !isAdvance &&
                   (Boolean(data.expenseId) || refStr.startsWith('EXP-'));
                 return {
@@ -759,16 +777,19 @@ function MillDashboardShell() {
                   ownerId: String(data.ownerId ?? ''),
                   source: isAdjustment
                     ? 'adjustment'
-                    : isAdvance
-                      ? 'advance'
-                      : isExpense
-                        ? 'expense'
-                        : 'supplier',
+                    : isSalary
+                      ? 'salary'
+                      : isAdvance
+                        ? 'advance'
+                        : isExpense
+                          ? 'expense'
+                          : 'supplier',
                   supplierId: String(data.supplierId ?? ''),
                   ledgerEntryId: String(data.ledgerEntryId ?? ''),
                   expenseId: String(data.expenseId ?? ''),
                   employeeId: String(data.employeeId ?? ''),
                   advanceId: String(data.advanceId ?? ''),
+                  salaryPaymentId: String(data.salaryPaymentId ?? ''),
                   category: data.category
                     ? (String(data.category) as
                         | ExpenseCategory
@@ -824,10 +845,11 @@ function MillDashboardShell() {
       setExpensesLoaded(true);
     }
 
-    // 5. Employees, Advances & User Management (Admin ONLY)
+    // 5. Employees, Advances, Salary Payments & User Management (Admin ONLY)
     if (canViewEmployees(userRole)) {
       setEmployeesLoaded(false);
       setEmployeeAdvancesLoaded(false);
+      setSalaryPaymentsLoaded(false);
       setUsersLoaded(false);
 
       unsubscribers.push(
@@ -875,6 +897,11 @@ function MillDashboardShell() {
                   advanceDate: String(data.advanceDate ?? ''),
                   paymentMethod: data.paymentMethod as AdvancePaymentMethod,
                   note: String(data.note ?? ''),
+                  deducted: Boolean(data.deducted),
+                  deductedBySalaryId: data.deductedBySalaryId
+                    ? String(data.deductedBySalaryId)
+                    : null,
+                  deductedAt: data.deductedAt ?? null,
                   createdAt: data.createdAt ?? null,
                 };
               })
@@ -882,6 +909,41 @@ function MillDashboardShell() {
             setEmployeeAdvancesLoaded(true);
           },
           (error) => handleListenerError(error, 'employee_advances')
+        )
+      );
+
+      unsubscribers.push(
+        onSnapshot(
+          collection(db, 'salary_payments'),
+          (snapshot) => {
+            setSalaryPayments(
+              snapshot.docs.map((docSnap) => {
+                const data = docSnap.data();
+                return {
+                  id: docSnap.id,
+                  ownerId: String(data.ownerId ?? ''),
+                  employeeId: String(data.employeeId ?? ''),
+                  employeeName: String(data.employeeName ?? ''),
+                  department: String(data.department ?? ''),
+                  moneyOutId: String(data.moneyOutId ?? ''),
+                  reference: String(data.reference ?? docSnap.id),
+                  salaryMonth: String(data.salaryMonth ?? ''),
+                  paymentDate: String(data.paymentDate ?? ''),
+                  basicSalary: Number(data.basicSalary ?? 0),
+                  overtimeAmount: Number(data.overtimeAmount ?? 0),
+                  bonusAmount: Number(data.bonusAmount ?? 0),
+                  advanceDeduction: Number(data.advanceDeduction ?? 0),
+                  netSalary: Number(data.netSalary ?? 0),
+                  deductedAdvanceCount: Number(data.deductedAdvanceCount ?? 0),
+                  paymentMethod: data.paymentMethod as SalaryPaymentMethod,
+                  note: String(data.note ?? ''),
+                  createdAt: data.createdAt ?? null,
+                };
+              })
+            );
+            setSalaryPaymentsLoaded(true);
+          },
+          (error) => handleListenerError(error, 'salary_payments')
         )
       );
 
@@ -919,6 +981,8 @@ function MillDashboardShell() {
       setEmployeesLoaded(true);
       setEmployeeAdvances([]);
       setEmployeeAdvancesLoaded(true);
+      setSalaryPayments([]);
+      setSalaryPaymentsLoaded(true);
       setRegisteredUsers([]);
       setUsersLoaded(true);
     }
@@ -1059,6 +1123,14 @@ function MillDashboardShell() {
     [givingAdvanceEmployeeId, employeesById]
   );
 
+  const payingSalaryEmployee = useMemo(
+    () =>
+      payingSalaryEmployeeId
+        ? employeesById.get(payingSalaryEmployeeId) ?? null
+        : null,
+    [payingSalaryEmployeeId, employeesById]
+  );
+
   const currentYearMonth = getTodayIsoDate().slice(0, 7);
   const currentMonthLabel = useMemo(() => {
     const [year, month] = currentYearMonth.split('-').map(Number);
@@ -1075,7 +1147,8 @@ function MillDashboardShell() {
     for (const adv of employeeAdvances) {
       if (
         adv.employeeId === givingAdvanceEmployee.id &&
-        adv.advanceDate.startsWith(currentYearMonth)
+        adv.advanceDate.startsWith(currentYearMonth) &&
+        !adv.deducted
       ) {
         sum += Number(adv.amount) || 0;
       }
@@ -1147,6 +1220,7 @@ function MillDashboardShell() {
     !stockMovementsLoaded ||
     !employeesLoaded ||
     !employeeAdvancesLoaded ||
+    !salaryPaymentsLoaded ||
     !usersLoaded;
 
   const isAccountantView = userRole === 'accountant';
@@ -1507,10 +1581,14 @@ function MillDashboardShell() {
     const counterpartyLabel = supplier
       ? `${supplier.supplierName} (${supplier.companyName})`
       : employee
-        ? `${employee.name} (${employee.department})`
-        : record.category
-          ? `Factory Expense · ${record.category}`
-          : 'Cash Outflow';
+        ? record.source === 'salary'
+          ? `${employee.name} (${employee.department}) · Salary`
+          : `${employee.name} (${employee.department})`
+        : record.source === 'salary'
+          ? 'Employee Salary'
+          : record.category
+            ? `Factory Expense · ${record.category}`
+            : 'Cash Outflow';
     setLedgerAdjustmentTarget({
       kind: 'money_out',
       record,
@@ -2001,6 +2079,7 @@ function MillDashboardShell() {
               ownerId={user.uid}
               employees={employees}
               advances={employeeAdvances}
+              salaryPayments={salaryPayments}
               moneyOutRecords={moneyOutRecords}
               isLoading={isDataLoading}
               isAdmin={isAdmin}
@@ -2015,6 +2094,7 @@ function MillDashboardShell() {
               onGiveAdvance={(employee) =>
                 setGivingAdvanceEmployeeId(employee.id)
               }
+              onPaySalary={(employee) => setPayingSalaryEmployeeId(employee.id)}
               onOpenProfile={(employee) => setSelectedEmployeeId(employee.id)}
               onCorrectMoneyOut={handleOpenCorrectMoneyOut}
             />
@@ -2230,14 +2310,16 @@ function MillDashboardShell() {
         }}
       />
 
-      {/* Employee Profile & Weekly Advance History Drawer */}
+      {/* Employee Profile, Salary History & Weekly Advance Drawer */}
       <EmployeeProfileDrawer
         employee={selectedEmployee}
         advances={employeeAdvances}
+        salaryPayments={salaryPayments}
         moneyOutRecords={moneyOutRecords}
         isAdmin={isAdmin}
         onClose={() => setSelectedEmployeeId(null)}
         onGiveAdvance={(employee) => setGivingAdvanceEmployeeId(employee.id)}
+        onPaySalary={(employee) => setPayingSalaryEmployeeId(employee.id)}
         onDeleteEmployee={handleRequestDeleteEmployee}
         onCorrectMoneyOut={handleOpenCorrectMoneyOut}
         onProfileUpdated={(message) => setToast({ message })}
@@ -2256,6 +2338,34 @@ function MillDashboardShell() {
             message: `Issued ${formatCurrency(amount)} advance (${advanceRef} via ${paymentMethod}) to ${employee.name} and updated Net Cash Balance.`,
             actionLabel: 'View Dashboard',
             onAction: () => setActiveSection('overview'),
+          });
+        }}
+      />
+
+      {/* Pay Monthly Salary Modal (Atomic writeBatch to salary_payments + money_out + employee_advances deduction lock) */}
+      <PaySalaryModal
+        employee={payingSalaryEmployee}
+        advances={employeeAdvances}
+        salaryPayments={salaryPayments}
+        ownerId={user.uid}
+        onClose={() => setPayingSalaryEmployeeId(null)}
+        onSalaryPaid={(
+          employee,
+          salaryMonth,
+          netSalary,
+          salaryRef,
+          paymentMethod,
+          deductedCount
+        ) => {
+          setPayingSalaryEmployeeId(null);
+          const deductedSuffix =
+            deductedCount > 0
+              ? ` and marked ${deductedCount} advance${deductedCount === 1 ? '' : 's'} as deducted`
+              : '';
+          setToast({
+            message: `Paid ${formatCurrency(netSalary)} salary (${salaryRef} for ${salaryMonth} via ${paymentMethod}) to ${employee.name}${deductedSuffix}.`,
+            actionLabel: 'View Profile',
+            onAction: () => setSelectedEmployeeId(employee.id),
           });
         }}
       />

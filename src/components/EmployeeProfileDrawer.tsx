@@ -5,12 +5,15 @@ import {
   Building2,
   CalendarDays,
   Check,
+  CheckCircle2,
   Edit3,
   HandCoins,
   Phone,
+  ReceiptText,
   RotateCcw,
   Trash2,
   UserRound,
+  Wallet,
   X,
 } from 'lucide-react';
 import { db, handleFirestoreError, OperationType } from '../firebase';
@@ -20,6 +23,7 @@ import {
   type EmployeeAdvanceRecord,
   type EmployeeRecord,
   type MoneyOutRecord,
+  type SalaryPaymentRecord,
 } from '../types/mill';
 import {
   formatCurrency,
@@ -32,10 +36,12 @@ import {
 interface EmployeeProfileDrawerProps {
   employee: EmployeeRecord | null;
   advances: EmployeeAdvanceRecord[];
+  salaryPayments: SalaryPaymentRecord[];
   moneyOutRecords: MoneyOutRecord[];
   isAdmin: boolean;
   onClose: () => void;
   onGiveAdvance: (employee: EmployeeRecord) => void;
+  onPaySalary: (employee: EmployeeRecord) => void;
   onDeleteEmployee: (employee: EmployeeRecord) => void;
   onCorrectMoneyOut: (record: MoneyOutRecord) => void;
   onProfileUpdated: (message: string) => void;
@@ -56,13 +62,24 @@ function getCurrentMonthLabel(isoDate: string): string {
   }).format(new Date(year, month - 1, 1));
 }
 
+function formatSalaryMonthLabel(yearMonth: string): string {
+  const [year, month] = yearMonth.split('-').map(Number);
+  if (!year || !month) return yearMonth;
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'long',
+    year: 'numeric',
+  }).format(new Date(year, month - 1, 1));
+}
+
 export function EmployeeProfileDrawer({
   employee,
   advances,
+  salaryPayments,
   moneyOutRecords,
   isAdmin,
   onClose,
   onGiveAdvance,
+  onPaySalary,
   onDeleteEmployee,
   onCorrectMoneyOut,
   onProfileUpdated,
@@ -74,6 +91,9 @@ export function EmployeeProfileDrawer({
     [todayIso]
   );
 
+  const [historyTab, setHistoryTab] = useState<'salaries' | 'advances'>(
+    'salaries'
+  );
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState('');
   const [editMobile, setEditMobile] = useState('');
@@ -131,7 +151,25 @@ export function EmployeeProfileDrawer({
       });
   }, [employee, advances]);
 
+  const employeeSalaries = useMemo(() => {
+    if (!employee) return [];
+    return salaryPayments
+      .filter((sal) => sal.employeeId === employee.id)
+      .sort((a, b) => {
+        const timeA =
+          timestampToDate(a.createdAt)?.getTime() ??
+          getIsoDateFallbackMs(a.paymentDate);
+        const timeB =
+          timestampToDate(b.createdAt)?.getTime() ??
+          getIsoDateFallbackMs(b.paymentDate);
+        return timeB - timeA;
+      });
+  }, [employee, salaryPayments]);
+
   const advanceSummary = useMemo(() => {
+    let pendingMonthTotal = 0;
+    let pendingMonthCount = 0;
+    let deductedMonthTotal = 0;
     let thisMonthTotal = 0;
     let thisMonthCount = 0;
     let allTimeTotal = 0;
@@ -142,19 +180,40 @@ export function EmployeeProfileDrawer({
       if (adv.advanceDate.startsWith(currentYearMonth)) {
         thisMonthTotal += amt;
         thisMonthCount += 1;
+        if (adv.deducted) {
+          deductedMonthTotal += amt;
+        } else {
+          pendingMonthTotal += amt;
+          pendingMonthCount += 1;
+        }
       }
     }
 
-    const cleanMonthTotal = roundCurrency(thisMonthTotal);
+    let totalSalariesPaidAllTime = 0;
+    let paidThisMonthTotal = 0;
+    for (const sal of employeeSalaries) {
+      const net = Number(sal.netSalary) || 0;
+      totalSalariesPaidAllTime += net;
+      if (sal.salaryMonth === currentYearMonth) {
+        paidThisMonthTotal += net;
+      }
+    }
+
+    const cleanPendingMonth = roundCurrency(pendingMonthTotal);
     const basicSalary = employee?.basicSalary ?? 0;
 
     return {
-      thisMonthTotal: cleanMonthTotal,
+      pendingMonthTotal: cleanPendingMonth,
+      pendingMonthCount,
+      deductedMonthTotal: roundCurrency(deductedMonthTotal),
+      thisMonthTotal: roundCurrency(thisMonthTotal),
       thisMonthCount,
       allTimeTotal: roundCurrency(allTimeTotal),
-      remainingSalary: roundCurrency(basicSalary - cleanMonthTotal),
+      remainingSalary: roundCurrency(basicSalary - cleanPendingMonth),
+      totalSalariesPaidAllTime: roundCurrency(totalSalariesPaidAllTime),
+      paidThisMonthTotal: roundCurrency(paidThisMonthTotal),
     };
-  }, [employeeAdvances, currentYearMonth, employee]);
+  }, [employeeAdvances, employeeSalaries, currentYearMonth, employee]);
 
   const moneyOutByIdOrRef = useMemo(() => {
     const map = new Map<string, MoneyOutRecord>();
@@ -507,33 +566,45 @@ export function EmployeeProfileDrawer({
               <p className="mt-1.5 font-mono text-lg font-semibold tabular-nums text-slate-900">
                 {formatCurrency(employee.basicSalary)}
               </p>
+              <p className="mt-0.5 text-[11px] text-slate-500">
+                All-time paid:{' '}
+                {formatCurrency(advanceSummary.totalSalariesPaidAllTime)}
+              </p>
             </div>
 
             <div className="p-4 bg-amber-50/70 border border-amber-200 rounded-lg">
               <p className="text-[11px] font-medium text-amber-800">
-                Total Advance Taken This Month
+                Pending Advance ({currentMonthLabel})
               </p>
               <p className="mt-1.5 font-mono text-lg font-semibold tabular-nums text-amber-900">
-                {formatCurrency(advanceSummary.thisMonthTotal)}
+                {formatCurrency(advanceSummary.pendingMonthTotal)}
               </p>
               <p className="mt-0.5 text-[11px] text-amber-700">
-                {currentMonthLabel} · {advanceSummary.thisMonthCount}{' '}
-                {advanceSummary.thisMonthCount === 1 ? 'advance' : 'advances'}
+                {advanceSummary.pendingMonthCount} undeducted
+                {advanceSummary.deductedMonthTotal > 0
+                  ? ` · ${formatCurrency(advanceSummary.deductedMonthTotal)} deducted`
+                  : ''}
               </p>
             </div>
 
             <div className="p-4 bg-white border border-slate-200 rounded-lg">
               <p className="text-[11px] font-medium text-slate-500">
-                Est. Remaining Salary
+                {advanceSummary.paidThisMonthTotal > 0
+                  ? `Net Paid (${currentMonthLabel})`
+                  : 'Est. Remaining Salary'}
               </p>
               <p
                 className={`mt-1.5 font-mono text-lg font-semibold tabular-nums ${
-                  advanceSummary.remainingSalary < 0
-                    ? 'text-red-700'
-                    : 'text-emerald-700'
+                  advanceSummary.paidThisMonthTotal > 0
+                    ? 'text-emerald-700'
+                    : advanceSummary.remainingSalary < 0
+                      ? 'text-red-700'
+                      : 'text-emerald-700'
                 }`}
               >
-                {formatCurrency(advanceSummary.remainingSalary)}
+                {advanceSummary.paidThisMonthTotal > 0
+                  ? formatCurrency(advanceSummary.paidThisMonthTotal)
+                  : formatCurrency(advanceSummary.remainingSalary)}
               </p>
               <p className="mt-0.5 text-[11px] text-slate-500">
                 All-time adv: {formatCurrency(advanceSummary.allTimeTotal)}
@@ -541,101 +612,258 @@ export function EmployeeProfileDrawer({
             </div>
           </div>
 
-          {/* Action Bar */}
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <h3 className="font-display text-sm font-semibold text-slate-900">
-                Weekly Advance History
-              </h3>
-              <p className="text-xs text-slate-500">
-                {employeeAdvances.length} recorded{' '}
-                {employeeAdvances.length === 1 ? 'advance' : 'advances'} synced
-                with <span className="font-mono">money_out</span>
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => onGiveAdvance(employee)}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium text-white bg-[#1e3a8a] hover:bg-[#1e40af] rounded-md transition-colors cursor-pointer whitespace-nowrap"
-            >
-              <HandCoins className="w-3.5 h-3.5" />
-              Give Advance
-            </button>
-          </div>
+          {/* Action Bar & History Tabs */}
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2.5">
+              <div
+                role="tablist"
+                className="inline-flex items-center gap-1 p-1 bg-slate-100 rounded-md"
+              >
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={historyTab === 'salaries'}
+                  onClick={() => setHistoryTab('salaries')}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded transition-colors cursor-pointer whitespace-nowrap ${
+                    historyTab === 'salaries'
+                      ? 'bg-white text-slate-900 shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <ReceiptText className="w-3.5 h-3.5" />
+                  Salary History ({employeeSalaries.length})
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={historyTab === 'advances'}
+                  onClick={() => setHistoryTab('advances')}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded transition-colors cursor-pointer whitespace-nowrap ${
+                    historyTab === 'advances'
+                      ? 'bg-white text-slate-900 shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <HandCoins className="w-3.5 h-3.5" />
+                  Weekly Advances ({employeeAdvances.length})
+                </button>
+              </div>
 
-          {/* Advances List */}
-          {employeeAdvances.length === 0 ? (
-            <div className="py-10 px-4 text-center bg-slate-50 border border-slate-200 rounded-lg">
-              <p className="text-sm font-medium text-slate-900">
-                No advances taken yet
-              </p>
-              <p className="text-xs text-slate-500 mt-1">
-                Click Give Advance to issue a weekly salary advance and update
-                the live cash balance.
-              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => onPaySalary(employee)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-emerald-700 hover:bg-emerald-800 rounded-md transition-colors cursor-pointer whitespace-nowrap"
+                >
+                  <Wallet className="w-3.5 h-3.5" />
+                  Pay Salary
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onGiveAdvance(employee)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-[#1e3a8a] hover:bg-[#1e40af] rounded-md transition-colors cursor-pointer whitespace-nowrap"
+                >
+                  <HandCoins className="w-3.5 h-3.5" />
+                  Give Advance
+                </button>
+              </div>
             </div>
-          ) : (
-            <div className="border border-slate-200 rounded-lg overflow-hidden divide-y divide-slate-200">
-              {employeeAdvances.map((adv) => {
-                const isThisMonth = adv.advanceDate.startsWith(currentYearMonth);
-                const linkedMoneyOut =
-                  moneyOutByIdOrRef.get(adv.moneyOutId) ??
-                  moneyOutByIdOrRef.get(adv.reference) ??
-                  null;
-                return (
-                  <div
-                    key={adv.id}
-                    className="px-4 py-3.5 flex items-center justify-between gap-4 hover:bg-slate-50/70"
-                  >
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-mono text-xs font-semibold text-slate-900">
-                          {adv.reference}
-                        </span>
-                        {isThisMonth && (
-                          <span className="px-1.5 py-0.5 text-[10px] font-medium bg-amber-50 text-amber-800 border border-amber-200 rounded">
-                            This Month
-                          </span>
+
+            {historyTab === 'salaries' ? (
+              employeeSalaries.length === 0 ? (
+                <div className="py-10 px-4 text-center bg-slate-50 border border-slate-200 rounded-lg">
+                  <p className="text-sm font-medium text-slate-900">
+                    No salary payments recorded yet
+                  </p>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Click Pay Salary to settle monthly pay with automatic
+                    deduction of pending advances.
+                  </p>
+                </div>
+              ) : (
+                <div className="border border-slate-200 rounded-lg overflow-hidden divide-y divide-slate-200">
+                  {employeeSalaries.map((sal) => {
+                    const linkedMoneyOut = sal.moneyOutId
+                      ? moneyOutByIdOrRef.get(sal.moneyOutId) ??
+                        moneyOutByIdOrRef.get(sal.reference) ??
+                        null
+                      : null;
+                    return (
+                      <div
+                        key={sal.id}
+                        className="p-4 space-y-2.5 hover:bg-slate-50/70"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-display text-sm font-semibold text-slate-900">
+                                {formatSalaryMonthLabel(sal.salaryMonth)}
+                              </span>
+                              <span className="font-mono text-[11px] font-medium text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded">
+                                {sal.reference}
+                              </span>
+                            </div>
+                            <p className="text-xs text-slate-500 mt-0.5 flex items-center gap-2 flex-wrap">
+                              <span>Paid {formatIsoDate(sal.paymentDate)}</span>
+                              <span>·</span>
+                              <span className="inline-flex items-center gap-1">
+                                {sal.paymentMethod === 'Bank' ? (
+                                  <Building2 className="w-3 h-3 text-slate-400" />
+                                ) : (
+                                  <Banknote className="w-3 h-3 text-slate-400" />
+                                )}
+                                {sal.paymentMethod}
+                              </span>
+                            </p>
+                          </div>
+
+                          <div className="flex items-center gap-2 shrink-0">
+                            <div className="text-right">
+                              <p className="text-[10px] font-medium uppercase tracking-wider text-slate-400">
+                                Net Paid
+                              </p>
+                              <p className="font-mono text-sm font-bold tabular-nums text-emerald-700 whitespace-nowrap">
+                                {formatCurrency(sal.netSalary)}
+                              </p>
+                            </div>
+                            {linkedMoneyOut && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  onCorrectMoneyOut(linkedMoneyOut)
+                                }
+                                className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded transition-colors cursor-pointer whitespace-nowrap"
+                              >
+                                <RotateCcw className="w-3 h-3 shrink-0" />
+                                Correct
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 border-t border-slate-100 text-[11px]">
+                          <div>
+                            <span className="text-slate-400 block">Basic</span>
+                            <span className="font-mono font-medium text-slate-800 tabular-nums">
+                              {formatCurrency(sal.basicSalary)}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-slate-400 block">
+                              Overtime
+                            </span>
+                            <span className="font-mono font-medium text-slate-800 tabular-nums">
+                              +{formatCurrency(sal.overtimeAmount)}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-slate-400 block">Bonus</span>
+                            <span className="font-mono font-medium text-slate-800 tabular-nums">
+                              +{formatCurrency(sal.bonusAmount)}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-slate-400 block">
+                              Advance Deducted
+                            </span>
+                            <span className="font-mono font-medium text-amber-700 tabular-nums">
+                              −{formatCurrency(sal.advanceDeduction)}
+                            </span>
+                          </div>
+                        </div>
+
+                        {sal.note && (
+                          <p className="text-xs text-slate-600 break-words">
+                            {sal.note}
+                          </p>
                         )}
                       </div>
-                      <p className="text-xs text-slate-500 mt-0.5 flex items-center gap-2 flex-wrap">
-                        <span>{formatIsoDate(adv.advanceDate)}</span>
-                        <span>·</span>
-                        <span className="inline-flex items-center gap-1">
-                          {adv.paymentMethod === 'Bank' ? (
-                            <Building2 className="w-3 h-3 text-slate-400" />
+                    );
+                  })}
+                </div>
+              )
+            ) : employeeAdvances.length === 0 ? (
+              <div className="py-10 px-4 text-center bg-slate-50 border border-slate-200 rounded-lg">
+                <p className="text-sm font-medium text-slate-900">
+                  No advances taken yet
+                </p>
+                <p className="text-xs text-slate-500 mt-1">
+                  Click Give Advance to issue a weekly salary advance and update
+                  the live cash balance.
+                </p>
+              </div>
+            ) : (
+              <div className="border border-slate-200 rounded-lg overflow-hidden divide-y divide-slate-200">
+                {employeeAdvances.map((adv) => {
+                  const isThisMonth =
+                    adv.advanceDate.startsWith(currentYearMonth);
+                  const linkedMoneyOut =
+                    moneyOutByIdOrRef.get(adv.moneyOutId) ??
+                    moneyOutByIdOrRef.get(adv.reference) ??
+                    null;
+                  return (
+                    <div
+                      key={adv.id}
+                      className="px-4 py-3.5 flex items-center justify-between gap-4 hover:bg-slate-50/70"
+                    >
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-mono text-xs font-semibold text-slate-900">
+                            {adv.reference}
+                          </span>
+                          {adv.deducted ? (
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium bg-emerald-50 text-emerald-800 border border-emerald-200 rounded">
+                              <CheckCircle2 className="w-2.5 h-2.5" />
+                              Deducted
+                              {adv.deductedBySalaryId
+                                ? ` (${adv.deductedBySalaryId})`
+                                : ''}
+                            </span>
                           ) : (
-                            <Banknote className="w-3 h-3 text-slate-400" />
+                            <span className="px-1.5 py-0.5 text-[10px] font-medium bg-amber-50 text-amber-800 border border-amber-200 rounded">
+                              {isThisMonth ? 'Pending · This Month' : 'Pending'}
+                            </span>
                           )}
-                          {adv.paymentMethod}
-                        </span>
-                      </p>
-                      {adv.note && (
-                        <p className="text-xs text-slate-600 mt-1 break-words">
-                          {adv.note}
+                        </div>
+                        <p className="text-xs text-slate-500 mt-0.5 flex items-center gap-2 flex-wrap">
+                          <span>{formatIsoDate(adv.advanceDate)}</span>
+                          <span>·</span>
+                          <span className="inline-flex items-center gap-1">
+                            {adv.paymentMethod === 'Bank' ? (
+                              <Building2 className="w-3 h-3 text-slate-400" />
+                            ) : (
+                              <Banknote className="w-3 h-3 text-slate-400" />
+                            )}
+                            {adv.paymentMethod}
+                          </span>
                         </p>
-                      )}
+                        {adv.note && (
+                          <p className="text-xs text-slate-600 mt-1 break-words">
+                            {adv.note}
+                          </p>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2.5 shrink-0">
+                        <p className="font-mono text-sm font-semibold tabular-nums text-red-700 whitespace-nowrap">
+                          −{formatCurrency(adv.amount)}
+                        </p>
+                        {linkedMoneyOut && (
+                          <button
+                            type="button"
+                            onClick={() => onCorrectMoneyOut(linkedMoneyOut)}
+                            className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded transition-colors cursor-pointer whitespace-nowrap"
+                          >
+                            <RotateCcw className="w-3 h-3 shrink-0" />
+                            Correct / Adjust
+                          </button>
+                        )}
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2.5 shrink-0">
-                      <p className="font-mono text-sm font-semibold tabular-nums text-red-700 whitespace-nowrap">
-                        −{formatCurrency(adv.amount)}
-                      </p>
-                      {linkedMoneyOut && (
-                        <button
-                          type="button"
-                          onClick={() => onCorrectMoneyOut(linkedMoneyOut)}
-                          className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded transition-colors cursor-pointer whitespace-nowrap"
-                        >
-                          <RotateCcw className="w-3 h-3 shrink-0" />
-                          Correct / Adjust
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>

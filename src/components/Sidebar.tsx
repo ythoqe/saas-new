@@ -44,7 +44,7 @@ export function Sidebar({
   activeSection,
   onSelectSection,
   user,
-  userRole,
+  userRole = 'manager',
   onSignOut,
   clientCount,
   orderCount,

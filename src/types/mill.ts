@@ -105,6 +105,9 @@ export type EmployeeDepartment = (typeof EMPLOYEE_DEPARTMENTS)[number];
 export const ADVANCE_PAYMENT_METHODS = ['Cash', 'Bank'] as const;
 export type AdvancePaymentMethod = (typeof ADVANCE_PAYMENT_METHODS)[number];
 
+export const SALARY_PAYMENT_METHODS = ['Cash', 'Bank'] as const;
+export type SalaryPaymentMethod = (typeof SALARY_PAYMENT_METHODS)[number];
+
 export interface UserProfile {
   uid: string;
   email: string;
@@ -210,12 +213,13 @@ export interface PurchaseRecord {
 export interface MoneyOutRecord {
   id: string;
   ownerId: string;
-  source: 'supplier' | 'expense' | 'advance' | 'adjustment';
+  source: 'supplier' | 'expense' | 'advance' | 'salary' | 'adjustment';
   supplierId: string;
   ledgerEntryId: string;
   expenseId: string;
   employeeId: string;
   advanceId: string;
+  salaryPaymentId: string;
   category: ExpenseCategory | 'Employee Advance' | null;
   reference: string;
   amount: number;
@@ -288,6 +292,30 @@ export interface EmployeeAdvanceRecord {
   amount: number;
   advanceDate: string;
   paymentMethod: AdvancePaymentMethod;
+  note: string;
+  deducted: boolean;
+  deductedBySalaryId: string | null;
+  deductedAt: Timestamp | null;
+  createdAt: Timestamp | null;
+}
+
+export interface SalaryPaymentRecord {
+  id: string;
+  ownerId: string;
+  employeeId: string;
+  employeeName: string;
+  department: string;
+  moneyOutId: string;
+  reference: string;
+  salaryMonth: string;
+  paymentDate: string;
+  basicSalary: number;
+  overtimeAmount: number;
+  bonusAmount: number;
+  advanceDeduction: number;
+  netSalary: number;
+  deductedAdvanceCount: number;
+  paymentMethod: SalaryPaymentMethod;
   note: string;
   createdAt: Timestamp | null;
 }
@@ -394,6 +422,15 @@ export const EMPLOYEE_VALIDATION = {
 export const ADVANCE_VALIDATION = {
   maxAmount: 1000000000,
   noteMax: 300,
+  datePattern: /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/,
+} as const;
+
+export const SALARY_VALIDATION = {
+  maxBasic: 100000000,
+  maxBonusOrOvertime: 100000000,
+  maxAmount: 1000000000,
+  noteMax: 300,
+  monthPattern: /^[0-9]{4}-[0-9]{2}$/,
   datePattern: /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/,
 } as const;
 

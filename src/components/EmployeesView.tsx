@@ -11,10 +11,12 @@ import {
   Building2,
   CalendarDays,
   Check,
+  CheckCircle2,
   Edit2,
   HandCoins,
   History,
   Plus,
+  ReceiptText,
   RotateCcw,
   Search,
   Trash2,
@@ -31,6 +33,7 @@ import {
   type EmployeeDepartment,
   type EmployeeRecord,
   type MoneyOutRecord,
+  type SalaryPaymentRecord,
 } from '../types/mill';
 import {
   formatCurrency,
@@ -44,6 +47,7 @@ interface EmployeesViewProps {
   ownerId: string;
   employees: EmployeeRecord[];
   advances: EmployeeAdvanceRecord[];
+  salaryPayments: SalaryPaymentRecord[];
   moneyOutRecords: MoneyOutRecord[];
   isLoading: boolean;
   isAdmin: boolean;
@@ -52,6 +56,7 @@ interface EmployeesViewProps {
   onEmployeeUpdated: (message: string) => void;
   onDeleteEmployee: (employee: EmployeeRecord) => void;
   onGiveAdvance: (employee: EmployeeRecord) => void;
+  onPaySalary: (employee: EmployeeRecord) => void;
   onOpenProfile: (employee: EmployeeRecord) => void;
   onCorrectMoneyOut: (record: MoneyOutRecord) => void;
 }
@@ -81,10 +86,20 @@ function getIsoDateFallbackMs(isoDate: string): number {
   return new Date(y, m - 1, d).getTime();
 }
 
+function formatSalaryMonthLabel(yearMonth: string): string {
+  const [year, month] = yearMonth.split('-').map(Number);
+  if (!year || !month) return yearMonth;
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    year: 'numeric',
+  }).format(new Date(year, month - 1, 1));
+}
+
 export function EmployeesView({
   ownerId,
   employees,
   advances,
+  salaryPayments,
   moneyOutRecords,
   isLoading,
   isAdmin,
@@ -93,6 +108,7 @@ export function EmployeesView({
   onEmployeeUpdated,
   onDeleteEmployee,
   onGiveAdvance,
+  onPaySalary,
   onOpenProfile,
   onCorrectMoneyOut,
 }: EmployeesViewProps) {
@@ -117,13 +133,15 @@ export function EmployeesView({
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Right-panel tab & filters
-  const [activeTab, setActiveTab] = useState<'employees' | 'advances'>(
-    'employees'
-  );
+  const [activeTab, setActiveTab] = useState<
+    'employees' | 'advances' | 'salaries'
+  >('employees');
   const [searchQuery, setSearchQuery] = useState('');
   const [departmentFilter, setDepartmentFilter] = useState<string>('all');
   const [advanceSearch, setAdvanceSearch] = useState('');
   const [advancePeriod, setAdvancePeriod] = useState<'month' | 'all'>('month');
+  const [salarySearch, setSalarySearch] = useState('');
+  const [salaryPeriod, setSalaryPeriod] = useState<'month' | 'all'>('month');
 
   const nameInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -175,22 +193,42 @@ export function EmployeesView({
     }
   }, [focusFormSignal]);
 
-  // Map employeeId -> { thisMonthTotal, thisMonthCount, allTimeTotal }
+  // Map employeeId -> pending (undeducted) & total advances this month
   const advancesByEmployeeId = useMemo(() => {
     const map = new Map<
       string,
-      { thisMonthTotal: number; thisMonthCount: number; allTimeTotal: number }
+      {
+        pendingMonthTotal: number;
+        pendingMonthCount: number;
+        deductedMonthTotal: number;
+        thisMonthTotal: number;
+        thisMonthCount: number;
+        allTimeTotal: number;
+      }
     >();
 
     for (const adv of advances) {
       const prev = map.get(adv.employeeId) ?? {
+        pendingMonthTotal: 0,
+        pendingMonthCount: 0,
+        deductedMonthTotal: 0,
         thisMonthTotal: 0,
         thisMonthCount: 0,
         allTimeTotal: 0,
       };
       const amt = Number(adv.amount) || 0;
       const isThisMonth = adv.advanceDate.startsWith(currentYearMonth);
+      const isPendingThisMonth = isThisMonth && !adv.deducted;
+      const isDeductedThisMonth = isThisMonth && adv.deducted;
       map.set(adv.employeeId, {
+        pendingMonthTotal: roundCurrency(
+          prev.pendingMonthTotal + (isPendingThisMonth ? amt : 0)
+        ),
+        pendingMonthCount:
+          prev.pendingMonthCount + (isPendingThisMonth ? 1 : 0),
+        deductedMonthTotal: roundCurrency(
+          prev.deductedMonthTotal + (isDeductedThisMonth ? amt : 0)
+        ),
         thisMonthTotal: roundCurrency(
           prev.thisMonthTotal + (isThisMonth ? amt : 0)
         ),
@@ -202,6 +240,20 @@ export function EmployeesView({
     return map;
   }, [advances, currentYearMonth]);
 
+  // Map employeeId -> current month salary payment summary
+  const salaryPaidThisMonthByEmployeeId = useMemo(() => {
+    const map = new Map<string, { netPaid: number; count: number }>();
+    for (const sal of salaryPayments) {
+      if (sal.salaryMonth !== currentYearMonth) continue;
+      const prev = map.get(sal.employeeId) ?? { netPaid: 0, count: 0 };
+      map.set(sal.employeeId, {
+        netPaid: roundCurrency(prev.netPaid + (Number(sal.netSalary) || 0)),
+        count: prev.count + 1,
+      });
+    }
+    return map;
+  }, [salaryPayments, currentYearMonth]);
+
   // Real-time KPI summary
   const stats = useMemo(() => {
     let totalMonthlyPayroll = 0;
@@ -211,28 +263,44 @@ export function EmployeesView({
       if (emp.department) deptSet.add(emp.department);
     }
 
-    let totalAdvanceThisMonth = 0;
-    let advanceCountThisMonth = 0;
+    let pendingAdvanceThisMonth = 0;
+    let pendingAdvanceCountThisMonth = 0;
+    let deductedAdvanceThisMonth = 0;
     for (const adv of advances) {
       if (adv.advanceDate.startsWith(currentYearMonth)) {
-        totalAdvanceThisMonth += Number(adv.amount) || 0;
-        advanceCountThisMonth += 1;
+        const amt = Number(adv.amount) || 0;
+        if (adv.deducted) {
+          deductedAdvanceThisMonth += amt;
+        } else {
+          pendingAdvanceThisMonth += amt;
+          pendingAdvanceCountThisMonth += 1;
+        }
+      }
+    }
+
+    let salariesPaidThisMonth = 0;
+    let salaryCountThisMonth = 0;
+    for (const sal of salaryPayments) {
+      if (sal.salaryMonth === currentYearMonth) {
+        salariesPaidThisMonth += Number(sal.netSalary) || 0;
+        salaryCountThisMonth += 1;
       }
     }
 
     const cleanPayroll = roundCurrency(totalMonthlyPayroll);
-    const cleanAdvances = roundCurrency(totalAdvanceThisMonth);
 
     return {
       employeeCount: employees.length,
       departmentCount: deptSet.size,
       totalMonthlyPayroll: cleanPayroll,
-      totalAdvanceThisMonth: cleanAdvances,
-      advanceCountThisMonth,
-      netEstPayroll: roundCurrency(cleanPayroll - cleanAdvances),
+      pendingAdvanceThisMonth: roundCurrency(pendingAdvanceThisMonth),
+      pendingAdvanceCountThisMonth,
+      deductedAdvanceThisMonth: roundCurrency(deductedAdvanceThisMonth),
+      salariesPaidThisMonth: roundCurrency(salariesPaidThisMonth),
+      salaryCountThisMonth,
       availableDepartments: Array.from(deptSet).sort(),
     };
-  }, [employees, advances, currentYearMonth]);
+  }, [employees, advances, salaryPayments, currentYearMonth]);
 
   // Filtered employees
   const filteredEmployees = useMemo(() => {
@@ -294,6 +362,42 @@ export function EmployeesView({
     }
     return roundCurrency(sum);
   }, [filteredAdvances]);
+
+  // Filtered salary payments
+  const filteredSalaries = useMemo(() => {
+    const q = salarySearch.trim().toLowerCase();
+    return [...salaryPayments]
+      .sort((a, b) => {
+        const timeA =
+          timestampToDate(a.createdAt)?.getTime() ??
+          getIsoDateFallbackMs(a.paymentDate);
+        const timeB =
+          timestampToDate(b.createdAt)?.getTime() ??
+          getIsoDateFallbackMs(b.paymentDate);
+        return timeB - timeA;
+      })
+      .filter((sal) => {
+        if (salaryPeriod === 'month' && sal.salaryMonth !== currentYearMonth) {
+          return false;
+        }
+        if (!q) return true;
+        return (
+          sal.reference.toLowerCase().includes(q) ||
+          sal.employeeName.toLowerCase().includes(q) ||
+          sal.department.toLowerCase().includes(q) ||
+          sal.salaryMonth.toLowerCase().includes(q) ||
+          sal.note.toLowerCase().includes(q)
+        );
+      });
+  }, [salaryPayments, salarySearch, salaryPeriod, currentYearMonth]);
+
+  const filteredSalariesSubtotal = useMemo(() => {
+    let sum = 0;
+    for (const sal of filteredSalaries) {
+      sum += Number(sal.netSalary) || 0;
+    }
+    return roundCurrency(sum);
+  }, [filteredSalaries]);
 
   const parsedSalary = Number(basicSalaryInput);
   const isSalaryValid =
@@ -467,40 +571,40 @@ export function EmployeesView({
             </p>
           </div>
 
-          {/* Total Advances This Month */}
+          {/* Pending Advances This Month */}
           <div className="p-5">
             <div className="flex items-center justify-between gap-2">
               <p className="text-xs font-medium text-slate-500">
-                Advances This Month
+                Pending Advances ({currentMonthLabel})
               </p>
               <HandCoins className="w-4 h-4 text-amber-600 shrink-0" />
             </div>
             <p className="mt-2 font-mono text-2xl font-semibold tabular-nums text-amber-700">
-              {isLoading ? '—' : formatCurrency(stats.totalAdvanceThisMonth)}
+              {isLoading ? '—' : formatCurrency(stats.pendingAdvanceThisMonth)}
             </p>
             <p className="mt-1 text-xs text-slate-500">
-              {currentMonthLabel} · {stats.advanceCountThisMonth}{' '}
-              {stats.advanceCountThisMonth === 1 ? 'payout' : 'payouts'}
+              {stats.pendingAdvanceCountThisMonth} undeducted
+              {stats.deductedAdvanceThisMonth > 0
+                ? ` · ${formatCurrency(stats.deductedAdvanceThisMonth)} deducted`
+                : ''}
             </p>
           </div>
 
-          {/* Est. Remaining Payroll */}
+          {/* Salaries Paid This Month */}
           <div className="p-5">
             <div className="flex items-center justify-between gap-2">
               <p className="text-xs font-medium text-slate-500">
-                Est. Remaining Payroll
+                Salaries Paid ({currentMonthLabel})
               </p>
               <CalendarDays className="w-4 h-4 text-emerald-600 shrink-0" />
             </div>
-            <p
-              className={`mt-2 font-mono text-2xl font-semibold tabular-nums ${
-                stats.netEstPayroll < 0 ? 'text-red-700' : 'text-emerald-700'
-              }`}
-            >
-              {isLoading ? '—' : formatCurrency(stats.netEstPayroll)}
+            <p className="mt-2 font-mono text-2xl font-semibold tabular-nums text-emerald-700">
+              {isLoading ? '—' : formatCurrency(stats.salariesPaidThisMonth)}
             </p>
             <p className="mt-1 text-xs text-slate-500">
-              Basic payroll minus month advances
+              {stats.salaryCountThisMonth}{' '}
+              {stats.salaryCountThisMonth === 1 ? 'salary slip' : 'salary slips'}{' '}
+              settled
             </p>
           </div>
         </div>
@@ -738,7 +842,7 @@ export function EmployeesView({
         <section className="xl:col-span-8 bg-white border border-slate-200 rounded-lg overflow-hidden">
           {/* Tab Switcher Header */}
           <div className="px-5 pt-4 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-5" role="tablist">
+            <div className="flex items-center gap-5 overflow-x-auto" role="tablist">
               <button
                 type="button"
                 role="tab"
@@ -754,6 +858,23 @@ export function EmployeesView({
                 Employee Directory
                 <span className="font-mono text-xs tabular-nums text-slate-400">
                   ({employees.length})
+                </span>
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeTab === 'salaries'}
+                onClick={() => setActiveTab('salaries')}
+                className={`pb-3 text-sm font-medium border-b-2 transition-colors cursor-pointer inline-flex items-center gap-2 whitespace-nowrap ${
+                  activeTab === 'salaries'
+                    ? 'border-[#1e3a8a] text-[#1e3a8a]'
+                    : 'border-transparent text-slate-500 hover:text-slate-900'
+                }`}
+              >
+                <ReceiptText className="w-4 h-4" />
+                Salary History
+                <span className="font-mono text-xs tabular-nums text-slate-400">
+                  ({salaryPayments.length})
                 </span>
               </button>
               <button
@@ -866,14 +987,19 @@ export function EmployeesView({
                     <tbody className="divide-y divide-slate-200 text-sm">
                       {filteredEmployees.map((emp) => {
                         const empAdv = advancesByEmployeeId.get(emp.id) ?? {
+                          pendingMonthTotal: 0,
+                          pendingMonthCount: 0,
+                          deductedMonthTotal: 0,
                           thisMonthTotal: 0,
                           thisMonthCount: 0,
                           allTimeTotal: 0,
                         };
+                        const monthSalaryPaid =
+                          salaryPaidThisMonthByEmployeeId.get(emp.id);
                         const exceedsSalary =
-                          empAdv.thisMonthTotal > emp.basicSalary;
+                          empAdv.pendingMonthTotal > emp.basicSalary;
                         const remainingEst = roundCurrency(
-                          emp.basicSalary - empAdv.thisMonthTotal
+                          emp.basicSalary - empAdv.pendingMonthTotal
                         );
 
                         return (
@@ -887,9 +1013,17 @@ export function EmployeesView({
                                 onClick={() => onOpenProfile(emp)}
                                 className="text-left group cursor-pointer"
                               >
-                                <p className="font-medium text-slate-900 group-hover:text-[#1e3a8a] transition-colors">
-                                  {emp.name}
-                                </p>
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <p className="font-medium text-slate-900 group-hover:text-[#1e3a8a] transition-colors">
+                                    {emp.name}
+                                  </p>
+                                  {monthSalaryPaid && (
+                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium bg-emerald-50 text-emerald-800 border border-emerald-200 rounded">
+                                      <CheckCircle2 className="w-2.5 h-2.5" />
+                                      Paid
+                                    </span>
+                                  )}
+                                </div>
                                 <p className="text-xs text-slate-500 mt-0.5 font-mono">
                                   {emp.mobile}{' '}
                                   <span className="font-sans text-slate-400">
@@ -913,7 +1047,9 @@ export function EmployeesView({
                                 {formatCurrency(emp.basicSalary)}
                               </p>
                               <p className="text-[11px] font-mono tabular-nums text-slate-500 mt-0.5">
-                                Rem: {formatCurrency(remainingEst)}
+                                {monthSalaryPaid
+                                  ? `Net Paid: ${formatCurrency(monthSalaryPaid.netPaid)}`
+                                  : `Rem: ${formatCurrency(remainingEst)}`}
                               </p>
                             </td>
                             <td className="py-3.5 px-4 text-right whitespace-nowrap">
@@ -921,29 +1057,35 @@ export function EmployeesView({
                                 className={`font-mono text-sm font-semibold tabular-nums ${
                                   exceedsSalary
                                     ? 'text-red-700'
-                                    : empAdv.thisMonthTotal > 0
+                                    : empAdv.pendingMonthTotal > 0
                                       ? 'text-amber-700'
                                       : 'text-slate-500'
                                 }`}
                               >
-                                {formatCurrency(empAdv.thisMonthTotal)}
+                                {formatCurrency(empAdv.pendingMonthTotal)}
                               </p>
                               <p className="text-[11px] text-slate-500 mt-0.5">
-                                {empAdv.thisMonthCount === 0
-                                  ? 'No advance'
-                                  : `${empAdv.thisMonthCount} ${
-                                      empAdv.thisMonthCount === 1
-                                        ? 'advance'
-                                        : 'advances'
-                                    }`}
+                                {empAdv.pendingMonthCount > 0
+                                  ? `${empAdv.pendingMonthCount} pending`
+                                  : empAdv.deductedMonthTotal > 0
+                                    ? `${formatCurrency(empAdv.deductedMonthTotal)} deducted`
+                                    : 'No advance'}
                               </p>
                             </td>
                             <td className="py-3.5 px-5 text-right whitespace-nowrap">
                               <div className="inline-flex items-center justify-end gap-1.5">
                                 <button
                                   type="button"
+                                  onClick={() => onPaySalary(emp)}
+                                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-white bg-emerald-700 hover:bg-emerald-800 rounded-md transition-colors cursor-pointer"
+                                >
+                                  <Wallet className="w-3.5 h-3.5 shrink-0" />
+                                  Pay Salary
+                                </button>
+                                <button
+                                  type="button"
                                   onClick={() => onGiveAdvance(emp)}
-                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-[#1e3a8a] hover:bg-[#1e40af] rounded-md transition-colors cursor-pointer"
+                                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-white bg-[#1e3a8a] hover:bg-[#1e40af] rounded-md transition-colors cursor-pointer"
                                 >
                                   <HandCoins className="w-3.5 h-3.5 shrink-0" />
                                   Give Advance
@@ -978,6 +1120,177 @@ export function EmployeesView({
                                   </>
                                 )}
                               </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
+          ) : activeTab === 'salaries' ? (
+            <>
+              {/* Salary History Filter Bar */}
+              <div className="p-4 sm:px-5 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="relative flex-1">
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    type="search"
+                    value={salarySearch}
+                    onChange={(e) => setSalarySearch(e.target.value)}
+                    placeholder="Search SAL reference, employee, month, or note..."
+                    aria-label="Search salary payments"
+                    className="w-full pl-9 pr-3.5 py-2 text-sm text-slate-900 bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:bg-white focus:border-[#1e3a8a] focus:ring-1 focus:ring-[#1e3a8a]"
+                  />
+                </div>
+
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <div
+                    role="group"
+                    aria-label="Filter salary period"
+                    className="inline-flex items-center gap-1 p-1 bg-slate-100 rounded-md"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setSalaryPeriod('month')}
+                      className={`px-2.5 py-1 text-xs font-medium rounded transition-colors cursor-pointer whitespace-nowrap ${
+                        salaryPeriod === 'month'
+                          ? 'bg-white text-slate-900 shadow-xs'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      This Month
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSalaryPeriod('all')}
+                      className={`px-2.5 py-1 text-xs font-medium rounded transition-colors cursor-pointer whitespace-nowrap ${
+                        salaryPeriod === 'all'
+                          ? 'bg-white text-slate-900 shadow-xs'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      All Time
+                    </button>
+                  </div>
+
+                  <span className="font-mono text-xs font-semibold tabular-nums text-emerald-800 bg-emerald-50 border border-emerald-200 px-2.5 py-1.5 rounded-md whitespace-nowrap">
+                    Net Paid: {formatCurrency(filteredSalariesSubtotal)}
+                  </span>
+                </div>
+              </div>
+
+              {isLoading ? (
+                <div className="p-5 space-y-3 animate-pulse">
+                  {[1, 2, 3].map((i) => (
+                    <div key={i} className="h-10 bg-slate-100 rounded" />
+                  ))}
+                </div>
+              ) : filteredSalaries.length === 0 ? (
+                <div className="py-16 px-6 text-center">
+                  <p className="text-sm font-medium text-slate-900">
+                    {salaryPayments.length === 0
+                      ? 'No monthly salaries paid yet'
+                      : 'No salary payments match the selected filter'}
+                  </p>
+                  <p className="text-xs text-slate-500 mt-1">
+                    {salaryPayments.length === 0
+                      ? 'Click Pay Salary beside any employee to calculate net pay, auto-deduct monthly advances, and update cash balance.'
+                      : 'Switch to All Time or clear your search query.'}
+                  </p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="bg-slate-50/90 border-b border-slate-200 text-xs font-medium text-slate-600">
+                        <th className="py-3 px-5">Ref &amp; Month</th>
+                        <th className="py-3 px-4">Employee</th>
+                        <th className="py-3 px-4 text-right">Earnings</th>
+                        <th className="py-3 px-4 text-right">Adv. Deducted</th>
+                        <th className="py-3 px-4 text-right">Net Paid</th>
+                        <th className="py-3 px-5 text-right">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200 text-sm">
+                      {filteredSalaries.map((sal) => {
+                        const linkedMoneyOut = sal.moneyOutId
+                          ? moneyOutByIdOrRef.get(sal.moneyOutId) ??
+                            moneyOutByIdOrRef.get(sal.reference) ??
+                            null
+                          : null;
+                        const gross = roundCurrency(
+                          sal.basicSalary + sal.overtimeAmount + sal.bonusAmount
+                        );
+                        return (
+                          <tr
+                            key={sal.id}
+                            className="hover:bg-slate-50/80 transition-colors"
+                          >
+                            <td className="py-3.5 px-5 whitespace-nowrap">
+                              <p className="font-mono text-xs font-semibold text-slate-900">
+                                {sal.reference}
+                              </p>
+                              <p className="text-xs text-slate-500 mt-0.5">
+                                {formatSalaryMonthLabel(sal.salaryMonth)} · Paid{' '}
+                                {formatIsoDate(sal.paymentDate)}
+                              </p>
+                            </td>
+                            <td className="py-3.5 px-4 whitespace-nowrap">
+                              <p className="font-medium text-slate-900">
+                                {sal.employeeName}
+                              </p>
+                              <p className="text-xs text-slate-500 mt-0.5">
+                                {sal.department} · {sal.paymentMethod}
+                              </p>
+                            </td>
+                            <td className="py-3.5 px-4 text-right whitespace-nowrap">
+                              <p className="font-mono text-xs font-medium tabular-nums text-slate-900">
+                                {formatCurrency(gross)}
+                              </p>
+                              <p className="text-[11px] font-mono tabular-nums text-slate-500 mt-0.5">
+                                B:{formatCurrency(sal.basicSalary)}
+                                {sal.overtimeAmount > 0
+                                  ? ` +OT:${formatCurrency(sal.overtimeAmount)}`
+                                  : ''}
+                                {sal.bonusAmount > 0
+                                  ? ` +Bn:${formatCurrency(sal.bonusAmount)}`
+                                  : ''}
+                              </p>
+                            </td>
+                            <td className="py-3.5 px-4 text-right whitespace-nowrap">
+                              <p className="font-mono text-xs font-semibold tabular-nums text-amber-700">
+                                {sal.advanceDeduction > 0
+                                  ? `−${formatCurrency(sal.advanceDeduction)}`
+                                  : '৳0.00'}
+                              </p>
+                              {sal.deductedAdvanceCount > 0 && (
+                                <p className="text-[11px] text-slate-500 mt-0.5">
+                                  {sal.deductedAdvanceCount} adv settled
+                                </p>
+                              )}
+                            </td>
+                            <td className="py-3.5 px-4 text-right font-mono text-sm font-semibold tabular-nums text-emerald-700 whitespace-nowrap">
+                              {formatCurrency(sal.netSalary)}
+                            </td>
+                            <td className="py-3.5 px-5 text-right whitespace-nowrap">
+                              {linkedMoneyOut ? (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    onCorrectMoneyOut(linkedMoneyOut)
+                                  }
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded transition-colors cursor-pointer whitespace-nowrap"
+                                >
+                                  <RotateCcw className="w-3.5 h-3.5 shrink-0" />
+                                  Correct / Adjust
+                                </button>
+                              ) : (
+                                <span className="text-xs text-slate-400">
+                                  Settled
+                                </span>
+                              )}
                             </td>
                           </tr>
                         );
@@ -1083,11 +1396,25 @@ export function EmployeesView({
                             className="hover:bg-slate-50/80 transition-colors"
                           >
                             <td className="py-3.5 px-5 whitespace-nowrap">
-                              <p className="font-mono text-xs font-semibold text-slate-900">
-                                {adv.reference}
-                              </p>
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <p className="font-mono text-xs font-semibold text-slate-900">
+                                  {adv.reference}
+                                </p>
+                                {adv.deducted ? (
+                                  <span className="px-1.5 py-0.5 text-[10px] font-medium bg-emerald-50 text-emerald-800 border border-emerald-200 rounded">
+                                    Deducted
+                                  </span>
+                                ) : (
+                                  <span className="px-1.5 py-0.5 text-[10px] font-medium bg-amber-50 text-amber-800 border border-amber-200 rounded">
+                                    Pending
+                                  </span>
+                                )}
+                              </div>
                               <p className="text-xs text-slate-500 mt-0.5">
                                 {formatIsoDate(adv.advanceDate)}
+                                {adv.deductedBySalaryId
+                                  ? ` · via ${adv.deductedBySalaryId}`
+                                  : ''}
                               </p>
                             </td>
                             <td className="py-3.5 px-4 whitespace-nowrap">
