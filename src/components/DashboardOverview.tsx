@@ -13,6 +13,7 @@ import {
   Truck,
   Wallet,
 } from 'lucide-react';
+import { useLanguage } from '../contexts/LanguageContext';
 import type {
   ClientLedgerEntry,
   ClientRecord,
@@ -24,6 +25,7 @@ import type {
   OrderStatus,
   SupplierLedgerEntry,
   SupplierRecord,
+  UserRole,
 } from '../types/mill';
 import {
   calculateLedgerTotals,
@@ -35,8 +37,10 @@ import {
   roundCurrency,
   timestampToDate,
 } from '../utils/ledger';
+import { canViewEmployees, canViewOrders } from '../utils/rbac';
 
 interface DashboardOverviewProps {
+  userRole: UserRole;
   ledgerEntries: ClientLedgerEntry[];
   supplierLedgerEntries: SupplierLedgerEntry[];
   orders: OrderRecord[];
@@ -110,6 +114,7 @@ function getOrderStatusTone(status: OrderStatus): string {
 }
 
 export function DashboardOverview({
+  userRole,
   ledgerEntries,
   supplierLedgerEntries,
   orders,
@@ -127,7 +132,10 @@ export function DashboardOverview({
   onCorrectMoneyIn,
   onCorrectMoneyOut,
 }: DashboardOverviewProps) {
+  const { t, translateOrderStatus, translatePaymentMethod } = useLanguage();
   const todayIso = getTodayIsoDate();
+  const canSeeOrders = canViewOrders(userRole);
+  const canSeeEmployees = canViewEmployees(userRole);
 
   // 1. Financial KPIs (live from Firestore collections)
   const financialKpis = useMemo(() => {
@@ -351,7 +359,7 @@ export function DashboardOverview({
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <p className="text-xs font-medium text-slate-500">
-                    Total Receivable (Client Due)
+                    {t('dashboard.kpi.totalReceivable')}
                   </p>
                   <p
                     className={`mt-2 font-mono text-2xl sm:text-[28px] leading-tight font-semibold tabular-nums ${
@@ -378,14 +386,15 @@ export function DashboardOverview({
             </div>
             <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
               <span className="text-xs text-slate-500">
-                {clientsById.size} registered clients
+                <span className="font-mono tabular-nums">{clientsById.size}</span>{' '}
+                {t('dashboard.kpi.registeredClients')}
               </span>
               <button
                 type="button"
                 onClick={() => onNavigate('clients')}
                 className="inline-flex items-center gap-1 text-xs font-medium text-[#1e3a8a] hover:text-[#1e40af] cursor-pointer whitespace-nowrap"
               >
-                Clients
+                {t('dashboard.kpi.clientsLink')}
                 <ArrowRight className="w-3.5 h-3.5" />
               </button>
             </div>
@@ -397,7 +406,7 @@ export function DashboardOverview({
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <p className="text-xs font-medium text-slate-500">
-                    Total Payable (Supplier Due)
+                    {t('dashboard.kpi.totalPayable')}
                   </p>
                   <p
                     className={`mt-2 font-mono text-2xl sm:text-[28px] leading-tight font-semibold tabular-nums ${
@@ -424,14 +433,15 @@ export function DashboardOverview({
             </div>
             <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
               <span className="text-xs text-slate-500">
-                {suppliersById.size} active suppliers
+                <span className="font-mono tabular-nums">{suppliersById.size}</span>{' '}
+                {t('dashboard.kpi.activeSuppliers')}
               </span>
               <button
                 type="button"
                 onClick={() => onNavigate('suppliers')}
                 className="inline-flex items-center gap-1 text-xs font-medium text-[#1e3a8a] hover:text-[#1e40af] cursor-pointer whitespace-nowrap"
               >
-                Suppliers
+                {t('dashboard.kpi.suppliersLink')}
                 <ArrowRight className="w-3.5 h-3.5" />
               </button>
             </div>
@@ -443,7 +453,7 @@ export function DashboardOverview({
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <p className="text-xs font-medium text-slate-500">
-                    Net Cash Balance
+                    {t('dashboard.kpi.netCashBalance')}
                   </p>
                   <p
                     className={`mt-2 font-mono text-2xl sm:text-[28px] leading-tight font-semibold tabular-nums ${
@@ -464,20 +474,20 @@ export function DashboardOverview({
                 </div>
               </div>
               <p className="mt-3 text-xs text-slate-500 font-mono tabular-nums">
-                In {formatCurrency(financialKpis.totalMoneyIn)} · Out{' '}
-                {formatCurrency(financialKpis.totalMoneyOut)}
+                {t('dashboard.inLabel')} {formatCurrency(financialKpis.totalMoneyIn)} ·{' '}
+                {t('dashboard.outLabel')} {formatCurrency(financialKpis.totalMoneyOut)}
               </p>
             </div>
             <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
               <span className="text-xs text-slate-500">
-                Receipts minus payouts, expenses &amp; advances
+                {t('dashboard.kpi.netCashSub')}
               </span>
               <button
                 type="button"
                 onClick={() => onNavigate('expenses')}
                 className="inline-flex items-center gap-1 text-xs font-medium text-[#1e3a8a] hover:text-[#1e40af] cursor-pointer whitespace-nowrap"
               >
-                Expenses
+                {t('dashboard.kpi.expensesLink')}
                 <ArrowRight className="w-3.5 h-3.5" />
               </button>
             </div>
@@ -485,14 +495,15 @@ export function DashboardOverview({
         </div>
       </section>
 
-      {/* Section 2: Production & Order KPIs */}
+      {/* Section 2: Production & Order KPIs (Hidden for Accountant) */}
+      {canSeeOrders && (
       <section aria-label="Production and order metrics">
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 bg-white border border-slate-200 rounded-lg divide-y sm:divide-y-0 sm:divide-x divide-slate-200">
           {/* Total Orders Today */}
           <div className="p-5">
             <div className="flex items-center justify-between gap-2">
               <p className="text-xs font-medium text-slate-500">
-                Total Orders Today
+                {t('dashboard.kpi.ordersToday')}
               </p>
               <CalendarDays className="w-4 h-4 text-slate-400 shrink-0" />
             </div>
@@ -500,7 +511,7 @@ export function DashboardOverview({
               {isLoading ? '—' : formatNumber(productionKpis.ordersToday, 0)}
             </p>
             <p className="mt-1 text-xs text-slate-500">
-              Dated {formatIsoDate(todayIso)}
+              {t('dashboard.kpi.dated')} {formatIsoDate(todayIso)}
             </p>
           </div>
 
@@ -508,7 +519,7 @@ export function DashboardOverview({
           <div className="p-5">
             <div className="flex items-center justify-between gap-2">
               <p className="text-xs font-medium text-slate-500">
-                Running Processing
+                {t('dashboard.kpi.runningProcessing')}
               </p>
               <Activity className="w-4 h-4 text-amber-600 shrink-0" />
             </div>
@@ -518,7 +529,7 @@ export function DashboardOverview({
                 : formatNumber(productionKpis.runningProcessing, 0)}
             </p>
             <p className="mt-1 text-xs text-slate-500">
-              Processing · Dyeing · Washing
+              {t('dashboard.kpi.runningSub')}
             </p>
           </div>
 
@@ -526,7 +537,7 @@ export function DashboardOverview({
           <div className="p-5">
             <div className="flex items-center justify-between gap-2">
               <p className="text-xs font-medium text-slate-500">
-                Pending Delivery
+                {t('dashboard.kpi.pendingDelivery')}
               </p>
               <Clock className="w-4 h-4 text-[#1e3a8a] shrink-0" />
             </div>
@@ -536,7 +547,8 @@ export function DashboardOverview({
                 : formatNumber(productionKpis.pendingDelivery, 0)}
             </p>
             <p className="mt-1 text-xs text-slate-500 font-mono tabular-nums">
-              {formatNumber(productionKpis.pendingGreyGaj)} grey Gaj in mill
+              {formatNumber(productionKpis.pendingGreyGaj)}{' '}
+              {t('dashboard.kpi.greyGajInMill')}
             </p>
           </div>
 
@@ -544,34 +556,45 @@ export function DashboardOverview({
           <div className="p-5">
             <div className="flex items-center justify-between gap-2">
               <p className="text-xs font-medium text-slate-500">
-                Total Delivered Gaj
+                {t('dashboard.kpi.totalDeliveredGaj')}
               </p>
               <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
             </div>
             <p className="mt-2 font-mono text-2xl font-semibold tabular-nums text-emerald-700">
               {isLoading
                 ? '—'
-                : `${formatNumber(productionKpis.totalDeliveredGaj)} Gaj`}
+                : `${formatNumber(productionKpis.totalDeliveredGaj)} ${t('common.gaj')}`}
             </p>
             <p className="mt-1 text-xs text-slate-500">
-              Across {productionKpis.deliveredOrdersCount} delivered{' '}
-              {productionKpis.deliveredOrdersCount === 1 ? 'order' : 'orders'}
+              {t('dashboard.kpi.deliveredOrdersPrefix')}{' '}
+              <span className="font-mono tabular-nums">
+                {productionKpis.deliveredOrdersCount}
+              </span>{' '}
+              {productionKpis.deliveredOrdersCount === 1
+                ? t('dashboard.kpi.deliveredOrderSingular')
+                : t('dashboard.kpi.deliveredOrderPlural')}
             </p>
           </div>
         </div>
       </section>
+      )}
 
-      {/* Section 3: Recent Activity (2-Column Balanced Split) */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch">
-        {/* Recent Orders (Last 5) */}
+      {/* Section 3: Recent Activity (2-Column Balanced Split for Admin, Full-Width Financial Feed for Accountant) */}
+      <div
+        className={`grid grid-cols-1 ${
+          canSeeOrders ? 'lg:grid-cols-2' : ''
+        } gap-6 items-stretch`}
+      >
+        {/* Recent Orders (Last 5 — Admin / Manager only) */}
+        {canSeeOrders && (
         <section className="bg-white border border-slate-200 rounded-lg flex flex-col">
           <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between gap-4">
             <div>
               <h2 className="font-display text-sm font-semibold text-slate-900">
-                Recent Orders
+                {t('dashboard.recentOrders.title')}
               </h2>
               <p className="text-xs text-slate-500 mt-0.5">
-                Last 5 dyeing and washing batches
+                {t('dashboard.recentOrders.subtitle')}
               </p>
             </div>
             <button
@@ -579,7 +602,7 @@ export function DashboardOverview({
               onClick={() => onNavigate('orders')}
               className="inline-flex items-center gap-1 text-xs font-medium text-[#1e3a8a] hover:text-[#1e40af] cursor-pointer whitespace-nowrap"
             >
-              All Orders
+              {t('dashboard.recentOrders.allOrders')}
               <ArrowRight className="w-3.5 h-3.5" />
             </button>
           </div>
@@ -594,11 +617,10 @@ export function DashboardOverview({
             ) : recentOrders.length === 0 ? (
               <div className="p-10 text-center">
                 <p className="text-sm font-medium text-slate-900">
-                  No orders logged yet
+                  {t('dashboard.recentOrders.emptyTitle')}
                 </p>
                 <p className="text-xs text-slate-500 mt-1">
-                  Register a grey fabric batch to track dyeing, washing, and
-                  automatic billing.
+                  {t('dashboard.recentOrders.emptyDesc')}
                 </p>
                 <button
                   type="button"
@@ -606,7 +628,7 @@ export function DashboardOverview({
                   className="mt-4 inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium text-white bg-[#1e3a8a] hover:bg-[#1e40af] rounded-md transition-colors cursor-pointer"
                 >
                   <Plus className="w-3.5 h-3.5" />
-                  Create First Order
+                  {t('dashboard.recentOrders.createFirst')}
                 </button>
               </div>
             ) : (
@@ -614,8 +636,8 @@ export function DashboardOverview({
                 const client = clientsById.get(order.clientId);
                 const gajDisplay =
                   order.status === 'Delivered' && order.finalGaj !== null
-                    ? `${formatNumber(order.finalGaj)} final Gaj`
-                    : `${formatNumber(order.greyFabricGaj)} grey Gaj`;
+                    ? `${formatNumber(order.finalGaj)} ${t('dashboard.recentOrders.finalGaj')}`
+                    : `${formatNumber(order.greyFabricGaj)} ${t('dashboard.recentOrders.greyGaj')}`;
 
                 return (
                   <div
@@ -634,7 +656,7 @@ export function DashboardOverview({
                       className="min-w-0 flex-1 text-left cursor-pointer"
                     >
                       <p className="text-sm font-medium text-slate-900 truncate">
-                        {client ? client.clientName : 'Client Account'}
+                        {client ? client.clientName : t('common.client')}
                       </p>
                       <p className="text-xs text-slate-500 truncate mt-0.5">
                         <span className="font-medium text-slate-700">
@@ -651,7 +673,7 @@ export function DashboardOverview({
                             order.status
                           )}`}
                         >
-                          {order.status}
+                          {translateOrderStatus(order.status)}
                         </p>
                         <p className="font-mono text-[11px] tabular-nums text-slate-500 mt-0.5">
                           {order.id}
@@ -663,7 +685,7 @@ export function DashboardOverview({
                           onClick={() => onStartCompleteDeliver(order)}
                           className="px-2.5 py-1.5 text-xs font-medium text-[#1e3a8a] bg-white border border-slate-200 hover:border-[#1e3a8a]/40 hover:bg-blue-50/50 rounded-md transition-colors cursor-pointer whitespace-nowrap"
                         >
-                          Deliver
+                          {t('dashboard.recentOrders.deliver')}
                         </button>
                       )}
                     </div>
@@ -673,17 +695,17 @@ export function DashboardOverview({
             )}
           </div>
         </section>
+        )}
 
         {/* Recent Transactions (Last 5 from money_in & money_out) */}
         <section className="bg-white border border-slate-200 rounded-lg flex flex-col">
           <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between gap-4">
             <div>
               <h2 className="font-display text-sm font-semibold text-slate-900">
-                Recent Transactions
+                {t('dashboard.recentTxns.title')}
               </h2>
               <p className="text-xs text-slate-500 mt-0.5">
-                Last 5 cash &amp; bank movements across receipts, payouts, and
-                expenses
+                {t('dashboard.recentTxns.subtitle')}
               </p>
             </div>
             <button
@@ -691,7 +713,7 @@ export function DashboardOverview({
               onClick={() => onNavigate('ledger')}
               className="inline-flex items-center gap-1 text-xs font-medium text-[#1e3a8a] hover:text-[#1e40af] cursor-pointer whitespace-nowrap"
             >
-              Ledger Book
+              {t('dashboard.recentTxns.ledgerBook')}
               <ArrowRight className="w-3.5 h-3.5" />
             </button>
           </div>
@@ -706,11 +728,10 @@ export function DashboardOverview({
             ) : recentTransactions.length === 0 ? (
               <div className="p-10 text-center">
                 <p className="text-sm font-medium text-slate-900">
-                  No cash or bank transactions yet
+                  {t('dashboard.recentTxns.emptyTitle')}
                 </p>
                 <p className="text-xs text-slate-500 mt-1">
-                  Client receipts, supplier payouts, and factory expenses will
-                  appear here in real time.
+                  {t('dashboard.recentTxns.emptyDesc')}
                 </p>
                 <div className="mt-4 flex flex-wrap items-center justify-center gap-2.5">
                   <button
@@ -718,21 +739,21 @@ export function DashboardOverview({
                     onClick={() => onNavigate('clients')}
                     className="px-3.5 py-2 text-xs font-medium text-[#1e3a8a] bg-white border border-slate-200 hover:bg-slate-50 rounded-md transition-colors cursor-pointer"
                   >
-                    Receive Payment
+                    {t('dashboard.recentTxns.receivePayment')}
                   </button>
                   <button
                     type="button"
                     onClick={() => onNavigate('suppliers')}
                     className="px-3.5 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-md transition-colors cursor-pointer"
                   >
-                    Pay Supplier
+                    {t('dashboard.recentTxns.paySupplier')}
                   </button>
                   <button
                     type="button"
                     onClick={() => onNavigate('expenses')}
                     className="px-3.5 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-md transition-colors cursor-pointer"
                   >
-                    Log Expense
+                    {t('dashboard.recentTxns.logExpense')}
                   </button>
                 </div>
               </div>
@@ -765,7 +786,9 @@ export function DashboardOverview({
                         if (isMoneyIn && client) {
                           onOpenClientPayments(client);
                         } else if (isAdvance) {
-                          onNavigate('employees');
+                          if (canSeeEmployees) {
+                            onNavigate('employees');
+                          }
                         } else if (isExpense) {
                           onNavigate('expenses');
                         } else if (!isMoneyIn && supplier) {
@@ -799,17 +822,17 @@ export function DashboardOverview({
                           >
                             {isAdjustment
                               ? isMoneyIn
-                                ? 'Reversal In'
-                                : 'Reversal Out'
+                                ? t('dashboard.txn.reversalIn')
+                                : t('dashboard.txn.reversalOut')
                               : isMoneyIn
-                                ? 'Money In'
+                                ? t('dashboard.txn.moneyIn')
                                 : isAdvance
-                                  ? 'Advance Out'
+                                  ? t('dashboard.txn.advanceOut')
                                   : isExpense
-                                    ? 'Expense Out'
-                                    : 'Money Out'}
+                                    ? t('dashboard.txn.expenseOut')
+                                    : t('dashboard.txn.moneyOut')}
                           </span>{' '}
-                          · {txn.paymentMethod} ·{' '}
+                          · {translatePaymentMethod(txn.paymentMethod)} ·{' '}
                           {formatIsoDate(txn.paymentDate)}
                         </p>
                       </div>
@@ -838,11 +861,11 @@ export function DashboardOverview({
                             onCorrectMoneyOut(txn.rawRecord);
                           }
                         }}
-                        title="Correct / Adjust this cash entry via reversal"
+                        title={t('common.correctAdjust')}
                         className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded transition-colors cursor-pointer whitespace-nowrap"
                       >
                         <RotateCcw className="w-3 h-3 shrink-0" />
-                        Correct
+                        {t('common.correct')}
                       </button>
                     </div>
                   </div>

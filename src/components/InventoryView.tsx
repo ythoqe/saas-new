@@ -22,6 +22,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
+import { useLanguage } from '../contexts/LanguageContext';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import {
   INVENTORY_ITEM_PRESETS,
@@ -51,6 +52,7 @@ interface InventoryViewProps {
   items: InventoryItem[];
   movements: StockMovementRecord[];
   isLoading: boolean;
+  isAdmin: boolean;
   focusFormSignal: number;
   onNavigateNewPurchase: () => void;
   onDeleteItem: (item: InventoryItem) => void;
@@ -98,11 +100,14 @@ export function InventoryView({
   items,
   movements,
   isLoading,
+  isAdmin,
   focusFormSignal,
   onNavigateNewPurchase,
   onDeleteItem,
   onFeedback,
 }: InventoryViewProps) {
+  const { t, translateStockMovementType } = useLanguage();
+
   // Add / Edit Item Form State
   const [editingItem, setEditingItem] = useState<InventoryItem | null>(null);
   const [selectedPreset, setSelectedPreset] =
@@ -131,6 +136,7 @@ export function InventoryView({
   const presetSelectRef = useRef<HTMLSelectElement | null>(null);
 
   const startEditItem = (item: InventoryItem) => {
+    if (!isAdmin) return;
     setEditingItem(item);
     const isPreset = (INVENTORY_ITEM_PRESETS as readonly string[]).includes(
       item.itemName
@@ -448,7 +454,7 @@ export function InventoryView({
           <div className="p-5">
             <div className="flex items-center justify-between gap-2">
               <p className="text-xs font-medium text-slate-500">
-                Tracked Materials
+                {t('inventory.kpi.trackedMaterials')}
               </p>
               <Boxes className="w-4 h-4 text-[#1e3a8a] shrink-0" />
             </div>
@@ -456,7 +462,7 @@ export function InventoryView({
               {isLoading ? '—' : stats.totalItems}
             </p>
             <p className="mt-1 text-xs text-slate-500">
-              {stats.healthyCount} healthy · chemicals, jute &amp; spares
+              {stats.healthyCount} {t('inventory.kpi.healthySub')}
             </p>
           </div>
 
@@ -471,7 +477,7 @@ export function InventoryView({
           >
             <div className="flex items-center justify-between gap-2">
               <p className="text-xs font-medium text-slate-500">
-                Low Stock Alerts
+                {t('inventory.kpi.lowStockAlerts')}
               </p>
               <AlertTriangle
                 className={`w-4 h-4 shrink-0 ${
@@ -488,8 +494,8 @@ export function InventoryView({
             </p>
             <p className="mt-1 text-xs text-slate-500">
               {stats.lowStockCount > 0
-                ? 'Click to filter items below minimum'
-                : 'All stock levels above minimum'}
+                ? t('inventory.kpi.clickToFilter')
+                : t('inventory.kpi.allHealthy')}
             </p>
           </button>
 
@@ -497,7 +503,7 @@ export function InventoryView({
           <div className="p-5">
             <div className="flex items-center justify-between gap-2">
               <p className="text-xs font-medium text-slate-500">
-                Stock Movements
+                {t('inventory.kpi.stockMovements')}
               </p>
               <History className="w-4 h-4 text-slate-400 shrink-0" />
             </div>
@@ -505,8 +511,7 @@ export function InventoryView({
               {isLoading ? '—' : stats.totalMovements}
             </p>
             <p className="mt-1 text-xs text-slate-500">
-              Logged in{' '}
-              <span className="font-mono text-slate-600">stock_movements</span>
+              {t('inventory.kpi.loggedIn')}
             </p>
           </div>
 
@@ -515,7 +520,7 @@ export function InventoryView({
             <div>
               <div className="flex items-center justify-between gap-2">
                 <p className="text-xs font-medium text-slate-500">
-                  Purchase Restocks
+                  {t('inventory.kpi.purchaseRestocks')}
                 </p>
                 <PackageCheck className="w-4 h-4 text-emerald-600 shrink-0" />
               </div>
@@ -524,14 +529,16 @@ export function InventoryView({
               </p>
             </div>
             <div className="mt-1 flex items-center justify-between gap-2">
-              <span className="text-xs text-slate-500">Auto-synced</span>
+              <span className="text-xs text-slate-500">
+                {t('inventory.kpi.autoSynced')}
+              </span>
               <button
                 type="button"
                 onClick={onNavigateNewPurchase}
                 className="inline-flex items-center gap-1 text-xs font-medium text-[#1e3a8a] hover:text-[#1e40af] cursor-pointer whitespace-nowrap"
               >
                 <ShoppingCart className="w-3 h-3" />
-                New Purchase
+                {t('cta.newPurchase')}
               </button>
             </div>
           </div>
@@ -552,13 +559,13 @@ export function InventoryView({
                 className="font-display text-base font-semibold text-slate-900"
               >
                 {editingItem
-                  ? `Edit Item: ${editingItem.itemName}`
-                  : 'Add Item'}
+                  ? `${t('inventory.form.editTitle')}: ${editingItem.itemName}`
+                  : t('inventory.form.addTitle')}
               </h2>
               <p className="text-xs text-slate-500 mt-0.5">
                 {editingItem
-                  ? 'Update item name, unit, or minimum stock alert threshold'
-                  : 'Register chemicals, dyes, jute, or spare parts with reorder alerts'}
+                  ? t('inventory.form.editSubtitle')
+                  : t('inventory.form.addSubtitle')}
               </p>
             </div>
             {editingItem && (
@@ -566,7 +573,7 @@ export function InventoryView({
                 type="button"
                 onClick={cancelEditItem}
                 className="p-1 text-slate-400 hover:text-slate-700 rounded cursor-pointer"
-                title="Cancel editing"
+                title={t('inventory.form.cancelEdit')}
               >
                 <X className="w-4 h-4" />
               </button>
@@ -589,7 +596,8 @@ export function InventoryView({
                 htmlFor="inventoryItemPreset"
                 className="block text-sm font-medium text-slate-700 mb-1.5"
               >
-                Item Name <span className="text-red-600">*</span>
+                {t('inventory.form.itemName')}{' '}
+                <span className="text-red-600">*</span>
               </label>
               <select
                 ref={presetSelectRef}
@@ -616,7 +624,8 @@ export function InventoryView({
                   htmlFor="customInventoryName"
                   className="block text-sm font-medium text-slate-700 mb-1.5"
                 >
-                  Custom Item Name <span className="text-red-600">*</span>
+                  {t('inventory.form.customItemName')}{' '}
+                  <span className="text-red-600">*</span>
                 </label>
                 <input
                   id="customInventoryName"
@@ -634,7 +643,8 @@ export function InventoryView({
             {/* Unit */}
             <div>
               <span className="block text-sm font-medium text-slate-700 mb-1.5">
-                Unit <span className="text-red-600">*</span>
+                {t('inventory.form.unit')}{' '}
+                <span className="text-red-600">*</span>
               </span>
               <div
                 role="group"
@@ -668,7 +678,7 @@ export function InventoryView({
                   htmlFor="minStockLevel"
                   className="block text-sm font-medium text-slate-700 mb-1.5"
                 >
-                  Minimum Stock Alert Level ({unit}){' '}
+                  {t('inventory.form.minStock')} ({unit}){' '}
                   <span className="text-red-600">*</span>
                 </label>
                 <input
@@ -691,7 +701,7 @@ export function InventoryView({
                     htmlFor="initialCurrentStock"
                     className="block text-sm font-medium text-slate-700 mb-1.5"
                   >
-                    Initial Current Stock ({unit}){' '}
+                    {t('inventory.form.initialStock')} ({unit}){' '}
                     <span className="text-red-600">*</span>
                   </label>
                   <input
@@ -709,11 +719,11 @@ export function InventoryView({
                 </div>
               ) : (
                 <div className="p-3 bg-slate-50 border border-slate-200 rounded-md text-xs text-slate-600">
-                  Current Stock:{' '}
+                  {t('inventory.table.currentStock')}:{' '}
                   <span className="font-mono font-semibold text-slate-900">
                     {formatNumber(editingItem.currentStock)} {editingItem.unit}
                   </span>{' '}
-                  (use Stock In / Stock Out buttons to adjust stock quantity)
+                  ({t('inventory.form.currentStockNote')})
                 </div>
               )}
             </div>
@@ -739,39 +749,45 @@ export function InventoryView({
                 {editingItem ? (
                   <>
                     <Check className="w-4 h-4 shrink-0" />
-                    {isSubmitting ? 'Saving Changes...' : 'Save Changes'}
+                    {isSubmitting
+                      ? t('inventory.form.saving')
+                      : t('common.saveChanges')}
                   </>
                 ) : (
                   <>
                     <Plus className="w-4 h-4 shrink-0" />
-                    {isSubmitting ? 'Adding Item...' : 'Add Inventory Item'}
+                    {isSubmitting
+                      ? t('inventory.form.adding')
+                      : t('inventory.form.addBtn')}
                   </>
                 )}
               </button>
 
               {editingItem && (
-                <div className="grid grid-cols-2 gap-2">
+                <div className={isAdmin ? 'grid grid-cols-2 gap-2' : ''}>
                   <button
                     type="button"
                     onClick={cancelEditItem}
                     disabled={isSubmitting}
                     className="w-full px-3 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-md transition-colors cursor-pointer"
                   >
-                    Cancel Edit
+                    {t('inventory.form.cancelEdit')}
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const target = editingItem;
-                      cancelEditItem();
-                      onDeleteItem(target);
-                    }}
-                    disabled={isSubmitting}
-                    className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium text-red-700 bg-red-50 border border-red-200 hover:bg-red-100 rounded-md transition-colors cursor-pointer"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                    Delete Item
-                  </button>
+                  {isAdmin && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const target = editingItem;
+                        cancelEditItem();
+                        onDeleteItem(target);
+                      }}
+                      disabled={isSubmitting}
+                      className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium text-red-700 bg-red-50 border border-red-200 hover:bg-red-100 rounded-md transition-colors cursor-pointer"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      {t('inventory.form.deleteItem')}
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -799,7 +815,7 @@ export function InventoryView({
                       : 'text-slate-600 hover:text-slate-900'
                   }`}
                 >
-                  Inventory List ({items.length})
+                  {t('inventory.tab.items')} ({items.length})
                 </button>
                 <button
                   type="button"
@@ -812,15 +828,17 @@ export function InventoryView({
                       : 'text-slate-600 hover:text-slate-900'
                   }`}
                 >
-                  Movement History ({movements.length})
+                  {t('inventory.tab.history')} ({movements.length})
                 </button>
               </div>
 
               {activeTab === 'items' && stats.lowStockCount > 0 && (
                 <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-red-700 bg-red-50 border border-red-200 rounded-md">
                   <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                  {stats.lowStockCount} Low Stock{' '}
-                  {stats.lowStockCount === 1 ? 'Item' : 'Items'}
+                  {stats.lowStockCount}{' '}
+                  {stats.lowStockCount === 1
+                    ? t('inventory.lowStockItemSingular')
+                    : t('inventory.lowStockItemPlural')}
                 </span>
               )}
             </div>
@@ -835,8 +853,8 @@ export function InventoryView({
                   onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder={
                     activeTab === 'items'
-                      ? 'Search chemical, dye, jute, or spare part...'
-                      : 'Search item, reference, date, or note...'
+                      ? t('inventory.searchItemsPlaceholder')
+                      : t('inventory.searchHistoryPlaceholder')
                   }
                   aria-label="Search inventory"
                   className="w-full pl-9 pr-3.5 py-2 text-sm text-slate-900 bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:bg-white focus:border-[#1e3a8a] focus:ring-1 focus:ring-[#1e3a8a]"
@@ -853,9 +871,11 @@ export function InventoryView({
                     }
                     className="px-3 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-200 rounded-md focus:outline-none focus:border-[#1e3a8a] focus:ring-1 focus:ring-[#1e3a8a]"
                   >
-                    <option value="all">All Status</option>
-                    <option value="low">Low Stock Only</option>
-                    <option value="healthy">Healthy Stock</option>
+                    <option value="all">{t('purchases.filter.allStatus')}</option>
+                    <option value="low">{t('inventory.filter.lowOnly')}</option>
+                    <option value="healthy">
+                      {t('inventory.filter.healthyStock')}
+                    </option>
                   </select>
 
                   <div
@@ -872,7 +892,7 @@ export function InventoryView({
                           : 'text-slate-600 hover:text-slate-900'
                       }`}
                     >
-                      All
+                      {t('common.all')}
                     </button>
                     {INVENTORY_UNITS.map((u) => (
                       <button
@@ -898,7 +918,7 @@ export function InventoryView({
                     onChange={(e) => setHistoryItemIdFilter(e.target.value)}
                     className="px-3 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-200 rounded-md focus:outline-none focus:border-[#1e3a8a] focus:ring-1 focus:ring-[#1e3a8a]"
                   >
-                    <option value="all">All Items</option>
+                    <option value="all">{t('inventory.filter.allItems')}</option>
                     {items.map((it) => (
                       <option key={it.id} value={it.id}>
                         {it.itemName} ({it.unit})
@@ -912,11 +932,15 @@ export function InventoryView({
                     onChange={(e) => setHistoryTypeFilter(e.target.value)}
                     className="px-3 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-200 rounded-md focus:outline-none focus:border-[#1e3a8a] focus:ring-1 focus:ring-[#1e3a8a]"
                   >
-                    <option value="all">All Types</option>
-                    <option value="in">Stock In</option>
-                    <option value="out">Stock Out</option>
-                    <option value="purchase">Purchase In</option>
-                    <option value="opening">Opening Stock</option>
+                    <option value="all">{t('inventory.filter.allTypes')}</option>
+                    <option value="in">{t('inventory.movement.in')}</option>
+                    <option value="out">{t('inventory.movement.out')}</option>
+                    <option value="purchase">
+                      {t('inventory.movement.purchase')}
+                    </option>
+                    <option value="opening">
+                      {t('inventory.movement.opening')}
+                    </option>
                   </select>
                 </>
               )}
@@ -944,18 +968,16 @@ export function InventoryView({
                     <Boxes className="w-5 h-5" />
                   </div>
                   <h3 className="font-display text-base font-semibold text-slate-900">
-                    No inventory items registered yet
+                    {t('inventory.empty.title')}
                   </h3>
                   <p className="text-sm text-slate-500 mt-1.5 max-w-md mx-auto">
-                    Use the Add Item form to register Jute, Bleaching, Soda,
-                    Acid, Blue, BMB, or Spare Parts. Once added, New Purchases
-                    can automatically restock them.
+                    {t('inventory.empty.desc')}
                   </p>
                 </div>
               ) : filteredItems.length === 0 ? (
                 <div className="py-14 px-6 text-center">
                   <p className="text-sm font-medium text-slate-900">
-                    No inventory items match your filters
+                    {t('inventory.empty.noMatch')}
                   </p>
                   <button
                     type="button"
@@ -966,7 +988,7 @@ export function InventoryView({
                     }}
                     className="mt-4 px-3.5 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-md transition-colors cursor-pointer"
                   >
-                    Clear Filters
+                    {t('common.clearFilters')}
                   </button>
                 </div>
               ) : (
@@ -974,13 +996,19 @@ export function InventoryView({
                   <table className="w-full text-left border-collapse">
                     <thead>
                       <tr className="bg-slate-50/90 border-b border-slate-200 text-xs font-medium text-slate-600">
-                        <th className="py-3 px-5">Item Name</th>
-                        <th className="py-3 px-4 text-right">Current Stock</th>
-                        <th className="py-3 px-4 text-right">
-                          Min Alert Level
+                        <th className="py-3 px-5">
+                          {t('inventory.table.itemName')}
                         </th>
-                        <th className="py-3 px-4">Status</th>
-                        <th className="py-3 px-5 text-right">Actions</th>
+                        <th className="py-3 px-4 text-right">
+                          {t('inventory.table.currentStock')}
+                        </th>
+                        <th className="py-3 px-4 text-right">
+                          {t('inventory.table.minAlert')}
+                        </th>
+                        <th className="py-3 px-4">{t('common.status')}</th>
+                        <th className="py-3 px-5 text-right">
+                          {t('common.actions')}
+                        </th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-200 text-sm">
@@ -1001,7 +1029,7 @@ export function InventoryView({
                                 {item.itemName}
                               </p>
                               <p className="text-xs text-slate-500 mt-0.5 font-mono tabular-nums">
-                                Updated{' '}
+                                {t('inventory.updated')}{' '}
                                 {formatDateTime(
                                   timestampToDate(item.updatedAt)
                                 )}
@@ -1025,12 +1053,12 @@ export function InventoryView({
                               {isLowStock ? (
                                 <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 text-xs font-medium text-red-700 bg-red-50 border border-red-200 rounded">
                                   <AlertTriangle className="w-3 h-3 shrink-0" />
-                                  Low Stock
+                                  {t('inventory.lowStockBadge')}
                                 </span>
                               ) : (
                                 <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded">
                                   <CheckCircle2 className="w-3 h-3 shrink-0" />
-                                  In Stock
+                                  {t('inventory.inStockBadge')}
                                 </span>
                               )}
                             </td>
@@ -1047,7 +1075,7 @@ export function InventoryView({
                                   className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-md transition-colors cursor-pointer"
                                 >
                                   <ArrowUpCircle className="w-3.5 h-3.5 shrink-0" />
-                                  Stock In
+                                  {t('inventory.action.stockIn')}
                                 </button>
                                 <button
                                   type="button"
@@ -1061,7 +1089,7 @@ export function InventoryView({
                                   className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 disabled:opacity-45 disabled:cursor-not-allowed rounded-md transition-colors cursor-pointer"
                                 >
                                   <ArrowDownCircle className="w-3.5 h-3.5 shrink-0 text-amber-700" />
-                                  Stock Out
+                                  {t('inventory.action.stockOut')}
                                 </button>
                                 <button
                                   type="button"
@@ -1069,30 +1097,34 @@ export function InventoryView({
                                     setHistoryItemIdFilter(item.id);
                                     setActiveTab('history');
                                   }}
-                                  title="View movement history"
+                                  title={t('inventory.tab.history')}
                                   aria-label={`View stock history for ${item.itemName}`}
                                   className="p-1.5 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded-md transition-colors cursor-pointer"
                                 >
                                   <History className="w-3.5 h-3.5" />
                                 </button>
-                                <button
-                                  type="button"
-                                  onClick={() => startEditItem(item)}
-                                  title="Edit Item"
-                                  aria-label={`Edit ${item.itemName}`}
-                                  className="p-1.5 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded-md transition-colors cursor-pointer"
-                                >
-                                  <Edit2 className="w-3.5 h-3.5" />
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => onDeleteItem(item)}
-                                  title="Delete Item"
-                                  aria-label={`Delete ${item.itemName}`}
-                                  className="p-1.5 text-slate-500 hover:text-red-700 hover:bg-red-50 rounded-md transition-colors cursor-pointer"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
+                                {isAdmin && (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={() => startEditItem(item)}
+                                      title={t('common.edit')}
+                                      aria-label={`Edit ${item.itemName}`}
+                                      className="p-1.5 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded-md transition-colors cursor-pointer"
+                                    >
+                                      <Edit2 className="w-3.5 h-3.5" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => onDeleteItem(item)}
+                                      title={t('common.delete')}
+                                      aria-label={`Delete ${item.itemName}`}
+                                      className="p-1.5 text-slate-500 hover:text-red-700 hover:bg-red-50 rounded-md transition-colors cursor-pointer"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </>
+                                )}
                               </div>
                             </td>
                           </tr>
@@ -1123,11 +1155,10 @@ export function InventoryView({
               ) : filteredMovements.length === 0 ? (
                 <div className="py-14 px-6 text-center">
                   <p className="text-sm font-medium text-slate-900">
-                    No stock movements recorded yet
+                    {t('inventory.empty.noHistory')}
                   </p>
                   <p className="text-xs text-slate-500 mt-1">
-                    Stock In, Stock Out, opening stock, and linked Purchase
-                    restocks appear here in real time.
+                    {t('inventory.empty.noHistoryDesc')}
                   </p>
                   {(historyItemIdFilter !== 'all' ||
                     historyTypeFilter !== 'all' ||
@@ -1141,7 +1172,7 @@ export function InventoryView({
                       }}
                       className="mt-4 px-3.5 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-md transition-colors cursor-pointer"
                     >
-                      Clear History Filters
+                      {t('inventory.clearHistoryFilters')}
                     </button>
                   )}
                 </div>
@@ -1150,12 +1181,16 @@ export function InventoryView({
                   <table className="w-full text-left border-collapse">
                     <thead>
                       <tr className="bg-slate-50/90 border-b border-slate-200 text-xs font-medium text-slate-600">
-                        <th className="py-3 px-5">Ref &amp; Date</th>
-                        <th className="py-3 px-4">Item</th>
-                        <th className="py-3 px-4">Type</th>
-                        <th className="py-3 px-4 text-right">Qty Change</th>
-                        <th className="py-3 px-4 text-right">Resulting</th>
-                        <th className="py-3 px-5">Note</th>
+                        <th className="py-3 px-5">{t('common.refAndDate')}</th>
+                        <th className="py-3 px-4">{t('inventory.table.item')}</th>
+                        <th className="py-3 px-4">{t('inventory.table.type')}</th>
+                        <th className="py-3 px-4 text-right">
+                          {t('inventory.table.qtyChange')}
+                        </th>
+                        <th className="py-3 px-4 text-right">
+                          {t('inventory.table.resulting')}
+                        </th>
+                        <th className="py-3 px-5">{t('common.note')}</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-200 text-sm">
@@ -1181,7 +1216,7 @@ export function InventoryView({
                               <span
                                 className={`inline-flex items-center px-2 py-0.5 text-xs font-medium rounded border ${badge.classes}`}
                               >
-                                {badge.label}
+                                {translateStockMovementType(mov.type)}
                               </span>
                             </td>
                             <td

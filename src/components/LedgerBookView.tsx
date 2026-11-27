@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { BookOpen, Printer, RotateCcw, Search } from 'lucide-react';
+import { useLanguage } from '../contexts/LanguageContext';
 import type {
   ClientLedgerEntry,
   ClientRecord,
@@ -9,7 +10,6 @@ import {
   calculateLedgerTotals,
   formatCurrency,
   formatDateTime,
-  getTxnTypeLabel,
   timestampToDate,
 } from '../utils/ledger';
 
@@ -32,6 +32,7 @@ export function LedgerBookView({
   onPrintInvoiceEntry,
   onCorrectLedgerEntry,
 }: LedgerBookViewProps) {
+  const { t, translateTxnType } = useLanguage();
   const [searchQuery, setSearchQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
 
@@ -68,19 +69,25 @@ export function LedgerBookView({
       {/* Totals Summary Bar */}
       <div className="grid grid-cols-1 sm:grid-cols-3 bg-white border border-slate-200 rounded-lg divide-y sm:divide-y-0 sm:divide-x divide-slate-200">
         <div className="p-5">
-          <p className="text-xs font-medium text-slate-500">Filtered Debit Sum</p>
+          <p className="text-xs font-medium text-slate-500">
+            {t('ledger.kpi.filteredDebit')}
+          </p>
           <p className="mt-1.5 font-mono text-xl font-semibold tabular-nums text-slate-900">
             {isLoading ? '—' : formatCurrency(filteredTotals.totalDebit)}
           </p>
         </div>
         <div className="p-5">
-          <p className="text-xs font-medium text-slate-500">Filtered Credit Sum</p>
+          <p className="text-xs font-medium text-slate-500">
+            {t('ledger.kpi.filteredCredit')}
+          </p>
           <p className="mt-1.5 font-mono text-xl font-semibold tabular-nums text-emerald-700">
             {isLoading ? '—' : formatCurrency(filteredTotals.totalCredit)}
           </p>
         </div>
         <div className="p-5">
-          <p className="text-xs font-medium text-slate-500">Net Ledger Balance (Dr − Cr)</p>
+          <p className="text-xs font-medium text-slate-500">
+            {t('ledger.kpi.netBalance')}
+          </p>
           <p
             className={`mt-1.5 font-mono text-xl font-semibold tabular-nums ${
               filteredTotals.currentDue > 0
@@ -104,7 +111,7 @@ export function LedgerBookView({
               type="search"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search client, reference number, or note..."
+              placeholder={t('ledger.searchPlaceholder')}
               aria-label="Search ledger entries"
               className="w-full pl-9 pr-3.5 py-2 text-sm text-slate-900 bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:bg-white focus:border-[#1e3a8a] focus:ring-1 focus:ring-[#1e3a8a]"
             />
@@ -117,11 +124,11 @@ export function LedgerBookView({
           >
             {(
               [
-                { id: 'all', label: 'All Types' },
-                { id: 'opening', label: 'Opening' },
-                { id: 'invoice', label: 'Bills' },
-                { id: 'payment', label: 'Payments' },
-                { id: 'adjustment', label: 'Adjustments' },
+                { id: 'all', label: t('ledger.filter.allTypes') },
+                { id: 'opening', label: t('ledger.filter.opening') },
+                { id: 'invoice', label: t('ledger.filter.bills') },
+                { id: 'payment', label: t('ledger.filter.payments') },
+                { id: 'adjustment', label: t('ledger.filter.adjustments') },
               ] as const
             ).map((tab) => (
               <button
@@ -155,11 +162,10 @@ export function LedgerBookView({
               <BookOpen className="w-5 h-5" />
             </div>
             <p className="text-sm font-medium text-slate-900">
-              No ledger entries match your view
+              {t('ledger.empty.title')}
             </p>
             <p className="text-xs text-slate-500 mt-1">
-              Open any client from Client Management to record dyeing bills or payment
-              receipts.
+              {t('ledger.empty.desc')}
             </p>
           </div>
         ) : (
@@ -167,13 +173,17 @@ export function LedgerBookView({
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="bg-slate-50/90 border-b border-slate-200 text-xs font-medium text-slate-600">
-                  <th className="py-3 px-5">Date</th>
-                  <th className="py-3 px-4">Client</th>
-                  <th className="py-3 px-4">Type &amp; Reference</th>
-                  <th className="py-3 px-4">Note</th>
-                  <th className="py-3 px-4 text-right">Debit</th>
-                  <th className="py-3 px-4 text-right">Credit</th>
-                  <th className="py-3 px-5 text-right">Actions</th>
+                  <th className="py-3 px-5">{t('common.date')}</th>
+                  <th className="py-3 px-4">{t('common.client')}</th>
+                  <th className="py-3 px-4">{t('ledger.table.typeReference')}</th>
+                  <th className="py-3 px-4">{t('common.note')}</th>
+                  <th className="py-3 px-4 text-right">
+                    {t('ledger.table.debit')}
+                  </th>
+                  <th className="py-3 px-4 text-right">
+                    {t('ledger.table.credit')}
+                  </th>
+                  <th className="py-3 px-5 text-right">{t('common.actions')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200 text-sm">
@@ -194,7 +204,7 @@ export function LedgerBookView({
                       </td>
                       <td className="py-3 px-4">
                         <p className="text-sm font-medium text-slate-900">
-                          {client ? client.clientName : 'Client'}
+                          {client ? client.clientName : t('common.client')}
                         </p>
                         {client && (
                           <p className="text-xs text-slate-500">{client.companyName}</p>
@@ -202,7 +212,7 @@ export function LedgerBookView({
                       </td>
                       <td className="py-3 px-4 whitespace-nowrap">
                         <p className="text-xs font-medium text-slate-800">
-                          {getTxnTypeLabel(entry.txn_type)}
+                          {translateTxnType(entry.txn_type)}
                         </p>
                         <p className="text-xs font-mono text-slate-500 mt-0.5">
                           {entry.reference || entry.txn_type}
@@ -241,7 +251,7 @@ export function LedgerBookView({
                               className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-[#1e3a8a] bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded transition-colors cursor-pointer whitespace-nowrap"
                             >
                               <Printer className="w-3.5 h-3.5 shrink-0" />
-                              Print Invoice
+                              {t('common.printInvoice')}
                             </button>
                           ) : null}
                           <button
@@ -250,7 +260,7 @@ export function LedgerBookView({
                             className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded transition-colors cursor-pointer whitespace-nowrap"
                           >
                             <RotateCcw className="w-3.5 h-3.5 shrink-0" />
-                            Correct / Adjust
+                            {t('common.correctAdjust')}
                           </button>
                         </div>
                       </td>

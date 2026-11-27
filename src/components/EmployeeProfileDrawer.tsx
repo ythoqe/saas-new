@@ -33,6 +33,7 @@ interface EmployeeProfileDrawerProps {
   employee: EmployeeRecord | null;
   advances: EmployeeAdvanceRecord[];
   moneyOutRecords: MoneyOutRecord[];
+  isAdmin: boolean;
   onClose: () => void;
   onGiveAdvance: (employee: EmployeeRecord) => void;
   onDeleteEmployee: (employee: EmployeeRecord) => void;
@@ -59,6 +60,7 @@ export function EmployeeProfileDrawer({
   employee,
   advances,
   moneyOutRecords,
+  isAdmin,
   onClose,
   onGiveAdvance,
   onDeleteEmployee,
@@ -290,24 +292,28 @@ export function EmployeeProfileDrawer({
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
-            {!isEditing && (
-              <button
-                type="button"
-                onClick={() => setIsEditing(true)}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-md transition-colors cursor-pointer"
-              >
-                <Edit3 className="w-3.5 h-3.5" />
-                Edit
-              </button>
+            {isAdmin && (
+              <>
+                {!isEditing && (
+                  <button
+                    type="button"
+                    onClick={() => setIsEditing(true)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-md transition-colors cursor-pointer"
+                  >
+                    <Edit3 className="w-3.5 h-3.5" />
+                    Edit
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => onDeleteEmployee(employee)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-700 bg-red-50 border border-red-200 hover:bg-red-100 rounded-md transition-colors cursor-pointer"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Delete
+                </button>
+              </>
             )}
-            <button
-              type="button"
-              onClick={() => onDeleteEmployee(employee)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-700 bg-red-50 border border-red-200 hover:bg-red-100 rounded-md transition-colors cursor-pointer"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              Delete
-            </button>
             <button
               type="button"
               onClick={onClose}

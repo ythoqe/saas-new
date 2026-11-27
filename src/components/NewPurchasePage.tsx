@@ -7,6 +7,7 @@ import {
   writeBatch,
 } from 'firebase/firestore';
 import { ArrowLeft, Boxes, CheckCircle2, Plus } from 'lucide-react';
+import { useLanguage } from '../contexts/LanguageContext';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import {
   INVENTORY_ITEM_PRESETS,
@@ -58,6 +59,7 @@ export function NewPurchasePage({
   onOpenInventory,
   onPurchaseCreated,
 }: NewPurchasePageProps) {
+  const { t } = useLanguage();
   const sortedSuppliers = useMemo(
     () =>
       [...suppliers].sort((a, b) =>
@@ -370,7 +372,7 @@ export function NewPurchasePage({
           className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-600 hover:text-slate-900 transition-colors cursor-pointer"
         >
           <ArrowLeft className="w-3.5 h-3.5" />
-          Back to Purchases
+          {t('purchases.form.backToPurchases')}
         </button>
       </div>
 
@@ -382,14 +384,10 @@ export function NewPurchasePage({
         >
           <div className="px-6 py-4 border-b border-slate-200">
             <h2 className="font-display text-base font-semibold text-slate-900">
-              Purchase Entry Details
+              {t('purchases.form.heading')}
             </h2>
             <p className="text-xs text-slate-500 mt-0.5">
-              Saving a purchase credits{' '}
-              <span className="font-mono text-slate-700">supplier_ledger</span>{' '}
-              and automatically increases stock in{' '}
-              <span className="font-mono text-slate-700">inventory</span> when
-              linked to a tracked item.
+              {t('purchases.form.subheading')}
             </p>
           </div>
 
@@ -410,7 +408,8 @@ export function NewPurchasePage({
                   htmlFor="purchaseSupplier"
                   className="block text-sm font-medium text-slate-700"
                 >
-                  Supplier <span className="text-red-600">*</span>
+                  {t('purchases.form.supplier')}{' '}
+                  <span className="text-red-600">*</span>
                 </label>
                 <button
                   type="button"
@@ -418,21 +417,20 @@ export function NewPurchasePage({
                   className="inline-flex items-center gap-1 text-xs font-medium text-[#1e3a8a] hover:text-[#1e40af] cursor-pointer whitespace-nowrap"
                 >
                   <Plus className="w-3.5 h-3.5" />
-                  Add New Supplier
+                  {t('cta.addNewSupplier')}
                 </button>
               </div>
               {sortedSuppliers.length === 0 ? (
                 <div className="p-4 bg-slate-50 border border-slate-200 rounded-md flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <p className="text-xs text-slate-600">
-                    No suppliers exist yet. Register a supplier before logging a
-                    purchase.
+                    {t('purchases.form.noSuppliers')}
                   </p>
                   <button
                     type="button"
                     onClick={onAddSupplier}
                     className="px-3 py-1.5 text-xs font-medium text-white bg-[#1e3a8a] hover:bg-[#1e40af] rounded-md transition-colors cursor-pointer whitespace-nowrap shrink-0"
                   >
-                    Create First Supplier
+                    {t('purchases.form.createFirstSupplier')}
                   </button>
                 </div>
               ) : (
@@ -443,7 +441,7 @@ export function NewPurchasePage({
                   onChange={(e) => setSupplierId(e.target.value)}
                   className="w-full px-3.5 py-2.5 text-sm text-slate-900 bg-white border border-slate-300 rounded-md focus:outline-none focus:border-[#1e3a8a] focus:ring-1 focus:ring-[#1e3a8a]"
                 >
-                  <option value="">Select a registered supplier...</option>
+                  <option value="">{t('purchases.form.selectSupplier')}</option>
                   {sortedSuppliers.map((supplier) => (
                     <option key={supplier.id} value={supplier.id}>
                       {supplier.supplierName} — {supplier.companyName} (
@@ -461,7 +459,7 @@ export function NewPurchasePage({
                   htmlFor="purchaseInventorySelect"
                   className="block text-sm font-medium text-slate-700"
                 >
-                  Inventory Item (Auto-Restock)
+                  {t('purchases.form.inventoryLink')}
                 </label>
                 <button
                   type="button"
@@ -469,7 +467,7 @@ export function NewPurchasePage({
                   className="inline-flex items-center gap-1 text-xs font-medium text-[#1e3a8a] hover:text-[#1e40af] cursor-pointer whitespace-nowrap"
                 >
                   <Boxes className="w-3.5 h-3.5" />
-                  Manage Inventory
+                  {t('purchases.form.manageInventory')}
                 </button>
               </div>
               <select
@@ -480,18 +478,16 @@ export function NewPurchasePage({
               >
                 <option value="">
                   {sortedInventory.length > 0
-                    ? 'Select tracked inventory item to auto-increase stock...'
-                    : 'No inventory items yet — enter custom item below'}
+                    ? t('purchases.form.selectInventory')
+                    : t('purchases.form.noInventory')}
                 </option>
                 {sortedInventory.map((inv) => (
                   <option key={inv.id} value={inv.id}>
-                    {inv.itemName} ({inv.unit}) — Current Stock:{' '}
+                    {inv.itemName} ({inv.unit}) — {t('inventory.table.currentStock')}:{' '}
                     {formatNumber(inv.currentStock)} {inv.unit}
                   </option>
                 ))}
-                <option value="custom">
-                  Custom / Non-Inventory Item (manual entry)
-                </option>
+                <option value="custom">{t('purchases.form.customItem')}</option>
               </select>
               {linkedInventoryItem && (
                 <p className="mt-1.5 flex items-center gap-1.5 text-xs text-emerald-700">
@@ -510,7 +506,7 @@ export function NewPurchasePage({
                   htmlFor="purchaseDate"
                   className="block text-sm font-medium text-slate-700 mb-1.5"
                 >
-                  Date <span className="text-red-600">*</span>
+                  {t('common.date')} <span className="text-red-600">*</span>
                 </label>
                 <input
                   id="purchaseDate"
@@ -527,7 +523,8 @@ export function NewPurchasePage({
                   htmlFor="itemName"
                   className="block text-sm font-medium text-slate-700 mb-1.5"
                 >
-                  Item Name <span className="text-red-600">*</span>
+                  {t('purchases.form.itemName')}{' '}
+                  <span className="text-red-600">*</span>
                 </label>
                 <input
                   id="itemName"
@@ -560,7 +557,8 @@ export function NewPurchasePage({
                   htmlFor="purchaseQuantity"
                   className="block text-sm font-medium text-slate-700 mb-1.5"
                 >
-                  Quantity <span className="text-red-600">*</span>
+                  {t('purchases.form.quantity')}{' '}
+                  <span className="text-red-600">*</span>
                 </label>
                 <input
                   id="purchaseQuantity"
@@ -581,7 +579,8 @@ export function NewPurchasePage({
                   htmlFor="purchaseUnit"
                   className="block text-sm font-medium text-slate-700 mb-1.5"
                 >
-                  Unit <span className="text-red-600">*</span>
+                  {t('purchases.form.unit')}{' '}
+                  <span className="text-red-600">*</span>
                 </label>
                 <select
                   id="purchaseUnit"
@@ -608,7 +607,8 @@ export function NewPurchasePage({
                   htmlFor="purchaseRate"
                   className="block text-sm font-medium text-slate-700 mb-1.5"
                 >
-                  Rate (per {unit}) <span className="text-red-600">*</span>
+                  {t('purchases.form.ratePerUnit')} ({unit}){' '}
+                  <span className="text-red-600">*</span>
                 </label>
                 <div className="relative">
                   <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-sm font-mono text-slate-500">
@@ -634,7 +634,7 @@ export function NewPurchasePage({
             <div className="p-4 bg-slate-50 border border-slate-200 rounded-md flex items-center justify-between gap-4">
               <div>
                 <p className="text-xs font-medium text-slate-700">
-                  Total Amount (Quantity × Rate)
+                  {t('purchases.form.totalFormula')}
                 </p>
                 <p className="text-[11px] font-mono text-slate-500 mt-0.5">
                   {parsedQty > 0 ? formatNumber(parsedQty) : '0'} {unit} ×{' '}
@@ -656,7 +656,7 @@ export function NewPurchasePage({
               disabled={isSubmitting}
               className="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-md transition-colors cursor-pointer whitespace-nowrap"
             >
-              Cancel
+              {t('common.cancel')}
             </button>
             <button
               type="submit"
@@ -667,7 +667,9 @@ export function NewPurchasePage({
               }
               className="px-5 py-2 text-sm font-medium text-white bg-[#1e3a8a] hover:bg-[#1e40af] disabled:opacity-60 disabled:cursor-not-allowed rounded-md transition-colors cursor-pointer whitespace-nowrap"
             >
-              {isSubmitting ? 'Recording Purchase...' : 'Save Purchase'}
+              {isSubmitting
+                ? t('purchases.form.recording')
+                : t('purchases.form.savePurchase')}
             </button>
           </div>
         </form>
@@ -676,7 +678,7 @@ export function NewPurchasePage({
         <aside className="bg-white border border-slate-200 rounded-lg p-6 space-y-5">
           <div>
             <h3 className="font-display text-sm font-semibold text-slate-900">
-              Atomic Posting Preview
+              {t('purchases.form.previewTitle')}
             </h3>
             <p className="text-xs text-slate-500 mt-0.5">
               Writes to <span className="font-mono">purchases</span>,{' '}
@@ -693,25 +695,35 @@ export function NewPurchasePage({
 
           <dl className="divide-y divide-slate-200 text-sm">
             <div className="py-3 flex items-center justify-between gap-4">
-              <dt className="text-xs text-slate-500">Supplier</dt>
+              <dt className="text-xs text-slate-500">
+                {t('purchases.form.supplier')}
+              </dt>
               <dd className="text-xs font-medium text-slate-900 text-right truncate max-w-[180px]">
-                {selectedSupplier ? selectedSupplier.supplierName : 'Not selected'}
+                {selectedSupplier
+                  ? selectedSupplier.supplierName
+                  : t('common.notSelected')}
               </dd>
             </div>
             <div className="py-3 flex items-center justify-between gap-4">
-              <dt className="text-xs text-slate-500">Item</dt>
+              <dt className="text-xs text-slate-500">
+                {t('purchases.form.item')}
+              </dt>
               <dd className="text-xs font-medium text-slate-900 text-right truncate max-w-[180px]">
                 {itemName.trim() || '—'}
               </dd>
             </div>
             <div className="py-3 flex items-center justify-between gap-4">
-              <dt className="text-xs text-slate-500">Quantity</dt>
+              <dt className="text-xs text-slate-500">
+                {t('purchases.form.quantity')}
+              </dt>
               <dd className="font-mono text-xs tabular-nums text-slate-900">
                 {parsedQty > 0 ? `${formatNumber(parsedQty)} ${unit}` : '—'}
               </dd>
             </div>
             <div className="py-3 flex items-center justify-between gap-4">
-              <dt className="text-xs text-slate-500">Supplier Credit (+Debt)</dt>
+              <dt className="text-xs text-slate-500">
+                {t('purchases.form.supplierCredit')}
+              </dt>
               <dd className="font-mono text-sm font-semibold tabular-nums text-red-700">
                 {calculatedTotal !== null
                   ? formatCurrency(calculatedTotal)
@@ -719,7 +731,9 @@ export function NewPurchasePage({
               </dd>
             </div>
             <div className="py-3 flex items-center justify-between gap-4">
-              <dt className="text-xs text-slate-500">Inventory Stock Sync</dt>
+              <dt className="text-xs text-slate-500">
+                {t('purchases.form.inventorySync')}
+              </dt>
               <dd className="font-mono text-xs tabular-nums text-right">
                 {linkedInventoryItem ? (
                   <span className="font-semibold text-emerald-700">
@@ -730,7 +744,7 @@ export function NewPurchasePage({
                     {linkedInventoryItem.unit}
                   </span>
                 ) : (
-                  <span className="text-slate-400">Not linked</span>
+                  <span className="text-slate-400">{t('common.notLinked')}</span>
                 )}
               </dd>
             </div>

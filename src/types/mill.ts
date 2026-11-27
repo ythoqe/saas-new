@@ -8,6 +8,9 @@ export type SupplierLedgerTxnType =
   | 'payment'
   | 'adjustment';
 
+export const USER_ROLES = ['admin', 'manager', 'accountant'] as const;
+export type UserRole = (typeof USER_ROLES)[number];
+
 export type NavSection =
   | 'clients'
   | 'orders'
@@ -19,7 +22,8 @@ export type NavSection =
   | 'expenses'
   | 'employees'
   | 'ledger'
-  | 'overview';
+  | 'overview'
+  | 'users';
 
 export const FABRIC_TYPES = [
   'মার্কিন',
@@ -100,6 +104,15 @@ export type EmployeeDepartment = (typeof EMPLOYEE_DEPARTMENTS)[number];
 
 export const ADVANCE_PAYMENT_METHODS = ['Cash', 'Bank'] as const;
 export type AdvancePaymentMethod = (typeof ADVANCE_PAYMENT_METHODS)[number];
+
+export interface UserProfile {
+  uid: string;
+  email: string;
+  displayName: string;
+  role: UserRole;
+  createdAt: Timestamp | null;
+  updatedAt: Timestamp | null;
+}
 
 export interface ClientRecord {
   id: string;
@@ -383,5 +396,12 @@ export const ADVANCE_VALIDATION = {
   noteMax: 300,
   datePattern: /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/,
 } as const;
+
+export const USER_VALIDATION = {
+  displayNameMax: 120,
+  emailMin: 3,
+  emailMax: 254,
+} as const;
+
 
 

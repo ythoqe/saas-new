@@ -11,6 +11,7 @@ import {
   Search,
   TrendingDown,
 } from 'lucide-react';
+import { useLanguage } from '../contexts/LanguageContext';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import {
   EXPENSE_CATEGORIES,
@@ -79,6 +80,7 @@ export function ExpensesView({
   onExpenseCreated,
   onCorrectMoneyOut,
 }: ExpensesViewProps) {
+  const { t, translateExpenseCategory, translatePaymentMethod } = useLanguage();
   const todayIso = getTodayIsoDate();
   const currentYearMonth = todayIso.slice(0, 7);
   const currentMonthLabel = useMemo(
@@ -336,7 +338,7 @@ export function ExpensesView({
           <div className="p-5">
             <div className="flex items-center justify-between gap-2">
               <p className="text-xs font-medium text-slate-500">
-                Total Expense This Month
+                {t('expenses.kpi.thisMonth')}
               </p>
               <CalendarDays className="w-4 h-4 text-red-600 shrink-0" />
             </div>
@@ -345,7 +347,9 @@ export function ExpensesView({
             </p>
             <p className="mt-1 text-xs text-slate-500">
               {currentMonthLabel} · {stats.thisMonthCount}{' '}
-              {stats.thisMonthCount === 1 ? 'entry' : 'entries'}
+              {stats.thisMonthCount === 1
+                ? t('common.entry')
+                : t('common.entries')}
             </p>
           </div>
 
@@ -353,18 +357,19 @@ export function ExpensesView({
           <div className="p-5">
             <div className="flex items-center justify-between gap-2">
               <p className="text-xs font-medium text-slate-500">
-                Monthly Payment Split
+                {t('expenses.kpi.paymentSplit')}
               </p>
               <Banknote className="w-4 h-4 text-slate-400 shrink-0" />
             </div>
             <p className="mt-2 font-mono text-lg font-semibold tabular-nums text-slate-900">
               {isLoading ? '—' : formatCurrency(stats.thisMonthCash)}{' '}
               <span className="text-xs font-sans font-normal text-slate-500">
-                Cash
+                {translatePaymentMethod('Cash')}
               </span>
             </p>
             <p className="mt-1 text-xs text-slate-500 font-mono tabular-nums">
-              Bank {isLoading ? '—' : formatCurrency(stats.thisMonthBank)}
+              {translatePaymentMethod('Bank')}{' '}
+              {isLoading ? '—' : formatCurrency(stats.thisMonthBank)}
             </p>
           </div>
 
@@ -372,7 +377,7 @@ export function ExpensesView({
           <div className="p-5">
             <div className="flex items-center justify-between gap-2">
               <p className="text-xs font-medium text-slate-500">
-                Top Category This Month
+                {t('expenses.kpi.topCategory')}
               </p>
               <Layers className="w-4 h-4 text-[#1e3a8a] shrink-0" />
             </div>
@@ -380,15 +385,15 @@ export function ExpensesView({
               {isLoading
                 ? '—'
                 : stats.topCategory
-                  ? stats.topCategory.name
-                  : 'None yet'}
+                  ? translateExpenseCategory(stats.topCategory.name)
+                  : t('common.noneYet')}
             </p>
             <p className="mt-1 text-xs text-slate-500 font-mono tabular-nums">
               {isLoading
                 ? '—'
                 : stats.topCategory
                   ? formatCurrency(stats.topCategory.amount)
-                  : 'No expenses this month'}
+                  : t('expenses.kpi.noExpensesMonth')}
             </p>
           </div>
 
@@ -396,7 +401,7 @@ export function ExpensesView({
           <div className="p-5">
             <div className="flex items-center justify-between gap-2">
               <p className="text-xs font-medium text-slate-500">
-                All-Time Expenses
+                {t('expenses.kpi.allTime')}
               </p>
               <TrendingDown className="w-4 h-4 text-slate-400 shrink-0" />
             </div>
@@ -404,9 +409,10 @@ export function ExpensesView({
               {isLoading ? '—' : formatCurrency(stats.allTimeTotal)}
             </p>
             <p className="mt-1 text-xs text-slate-500">
-              {stats.allTimeCount} synced{' '}
-              <span className="font-mono text-slate-600">money_out</span>{' '}
-              {stats.allTimeCount === 1 ? 'record' : 'records'}
+              {stats.allTimeCount} {t('expenses.kpi.syncedSub')}{' '}
+              {stats.allTimeCount === 1
+                ? t('common.record')
+                : t('common.records')}
             </p>
           </div>
         </div>
@@ -424,10 +430,10 @@ export function ExpensesView({
               id="add-expense-heading"
               className="font-display text-base font-semibold text-slate-900"
             >
-              Add Expense
+              {t('expenses.form.title')}
             </h2>
             <p className="text-xs text-slate-500 mt-0.5">
-              Log daily factory costs and deduct from live cash balance
+              {t('expenses.form.subtitle')}
             </p>
           </div>
 
@@ -448,7 +454,8 @@ export function ExpensesView({
                   htmlFor="expenseDate"
                   className="block text-sm font-medium text-slate-700 mb-1.5"
                 >
-                  Date <span className="text-red-600">*</span>
+                  {t('expenses.form.date')}{' '}
+                  <span className="text-red-600">*</span>
                 </label>
                 <input
                   id="expenseDate"
@@ -465,7 +472,8 @@ export function ExpensesView({
                   htmlFor="expenseCategory"
                   className="block text-sm font-medium text-slate-700 mb-1.5"
                 >
-                  Category <span className="text-red-600">*</span>
+                  {t('expenses.form.category')}{' '}
+                  <span className="text-red-600">*</span>
                 </label>
                 <select
                   id="expenseCategory"
@@ -478,7 +486,7 @@ export function ExpensesView({
                 >
                   {EXPENSE_CATEGORIES.map((cat) => (
                     <option key={cat} value={cat}>
-                      {cat}
+                      {translateExpenseCategory(cat)}
                     </option>
                   ))}
                 </select>
@@ -491,7 +499,8 @@ export function ExpensesView({
                 htmlFor="expenseAmount"
                 className="block text-sm font-medium text-slate-700 mb-1.5"
               >
-                Amount <span className="text-red-600">*</span>
+                {t('expenses.form.amount')}{' '}
+                <span className="text-red-600">*</span>
               </label>
               <div className="relative">
                 <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-sm font-mono text-slate-500">
@@ -516,7 +525,8 @@ export function ExpensesView({
             {/* Payment Method (Cash / Bank) */}
             <div>
               <span className="block text-sm font-medium text-slate-700 mb-1.5">
-                Payment Method <span className="text-red-600">*</span>
+                {t('expenses.form.paymentMethod')}{' '}
+                <span className="text-red-600">*</span>
               </span>
               <div
                 role="group"
@@ -538,7 +548,7 @@ export function ExpensesView({
                       }`}
                     >
                       <Icon className="w-3.5 h-3.5 shrink-0" />
-                      <span>{method}</span>
+                      <span>{translatePaymentMethod(method)}</span>
                     </button>
                   );
                 })}
@@ -552,7 +562,7 @@ export function ExpensesView({
                   htmlFor="expenseDescription"
                   className="block text-sm font-medium text-slate-700"
                 >
-                  Description / Note
+                  {t('expenses.form.description')}
                 </label>
                 <span className="font-mono text-[11px] text-slate-400 tabular-nums">
                   {description.length}/{EXPENSE_VALIDATION.descriptionMax}
@@ -564,7 +574,7 @@ export function ExpensesView({
                 maxLength={EXPENSE_VALIDATION.descriptionMax}
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                placeholder="e.g. Monthly boiler operator wages, DESCO electricity bill, or generator repair..."
+                placeholder={t('expenses.form.descriptionPlaceholder')}
                 className="w-full px-3.5 py-2.5 text-sm text-slate-900 bg-white border border-slate-300 rounded-md focus:outline-none focus:border-[#1e3a8a] focus:ring-1 focus:ring-[#1e3a8a] resize-none"
               />
             </div>
@@ -584,7 +594,9 @@ export function ExpensesView({
               className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium text-white bg-[#1e3a8a] hover:bg-[#1e40af] disabled:opacity-60 disabled:cursor-not-allowed rounded-md transition-colors cursor-pointer whitespace-nowrap"
             >
               <Plus className="w-4 h-4 shrink-0" />
-              {isSubmitting ? 'Saving Expense...' : 'Record Expense'}
+              {isSubmitting
+                ? t('expenses.form.saving')
+                : t('expenses.form.recordBtn')}
             </button>
           </form>
         </section>
@@ -599,7 +611,7 @@ export function ExpensesView({
             <div className="bg-white border border-slate-200 rounded-lg p-4 sm:px-5">
               <div className="flex items-center justify-between gap-3 mb-3">
                 <h3 className="text-xs font-semibold text-slate-700 uppercase tracking-wider">
-                  Spend by Category
+                  {t('expenses.spendByCategory')}
                 </h3>
                 {categoryFilter !== 'all' && (
                   <button
@@ -607,7 +619,7 @@ export function ExpensesView({
                     onClick={() => setCategoryFilter('all')}
                     className="text-xs font-medium text-[#1e3a8a] hover:text-[#1e40af] cursor-pointer"
                   >
-                    Show All Categories
+                    {t('expenses.showAllCategories')}
                   </button>
                 )}
               </div>
@@ -627,7 +639,9 @@ export function ExpensesView({
                           : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
                       }`}
                     >
-                      <span className="font-medium">{item.name}</span>
+                      <span className="font-medium">
+                        {translateExpenseCategory(item.name)}
+                      </span>
                       <span
                         className={`font-mono tabular-nums ${
                           isSelected ? 'text-blue-100' : 'text-slate-500'
@@ -651,16 +665,16 @@ export function ExpensesView({
                     id="expense-list-heading"
                     className="font-display text-base font-semibold text-slate-900"
                   >
-                    Recent Expenses
+                    {t('expenses.list.title')}
                   </h2>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    Real-time log of mill operating expenses synced with cash
-                    outflows
+                    {t('expenses.list.subtitle')}
                   </p>
                 </div>
                 {hasActiveFilters && (
                   <span className="font-mono text-xs font-semibold tabular-nums text-red-700 bg-red-50 border border-red-200 px-2.5 py-1 rounded-md">
-                    Filtered: {formatCurrency(filteredSubtotal)}
+                    {t('expenses.list.filtered')}:{' '}
+                    {formatCurrency(filteredSubtotal)}
                   </span>
                 )}
               </div>
@@ -673,7 +687,7 @@ export function ExpensesView({
                     type="search"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Search reference, category, or note..."
+                    placeholder={t('expenses.searchPlaceholder')}
                     aria-label="Search expenses"
                     className="w-full pl-9 pr-3.5 py-2 text-sm text-slate-900 bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:bg-white focus:border-[#1e3a8a] focus:ring-1 focus:ring-[#1e3a8a]"
                   />
@@ -685,10 +699,12 @@ export function ExpensesView({
                   onChange={(e) => setCategoryFilter(e.target.value)}
                   className="px-3 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-200 rounded-md focus:outline-none focus:border-[#1e3a8a] focus:ring-1 focus:ring-[#1e3a8a]"
                 >
-                  <option value="all">All Categories</option>
+                  <option value="all">
+                    {t('expenses.filter.allCategories')}
+                  </option>
                   {EXPENSE_CATEGORIES.map((cat) => (
                     <option key={cat} value={cat}>
-                      {cat}
+                      {translateExpenseCategory(cat)}
                     </option>
                   ))}
                 </select>
@@ -707,7 +723,7 @@ export function ExpensesView({
                         : 'text-slate-600 hover:text-slate-900'
                     }`}
                   >
-                    All
+                    {t('common.all')}
                   </button>
                   {EXPENSE_PAYMENT_METHODS.map((method) => (
                     <button
@@ -720,7 +736,7 @@ export function ExpensesView({
                           : 'text-slate-600 hover:text-slate-900'
                       }`}
                     >
-                      {method}
+                      {translatePaymentMethod(method)}
                     </button>
                   ))}
                 </div>
@@ -745,19 +761,16 @@ export function ExpensesView({
                   <Receipt className="w-5 h-5" />
                 </div>
                 <h3 className="font-display text-base font-semibold text-slate-900">
-                  No factory expenses recorded yet
+                  {t('expenses.empty.title')}
                 </h3>
                 <p className="text-sm text-slate-500 mt-1.5 max-w-md mx-auto">
-                  Use the Add Expense form to log salaries, electricity bills,
-                  rent, or daily mill costs. Each entry automatically posts to{' '}
-                  <span className="font-mono text-slate-700">money_out</span>{' '}
-                  and updates your Net Cash Balance.
+                  {t('expenses.empty.desc')}
                 </p>
               </div>
             ) : filteredExpenses.length === 0 ? (
               <div className="py-14 px-6 text-center">
                 <p className="text-sm font-medium text-slate-900">
-                  No expenses match your filters
+                  {t('expenses.empty.noMatch')}
                 </p>
                 <button
                   type="button"
@@ -768,7 +781,7 @@ export function ExpensesView({
                   }}
                   className="mt-4 px-3.5 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-md transition-colors cursor-pointer"
                 >
-                  Clear Filters
+                  {t('common.clearFilters')}
                 </button>
               </div>
             ) : (
@@ -776,12 +789,20 @@ export function ExpensesView({
                 <table className="w-full text-left border-collapse">
                   <thead>
                     <tr className="bg-slate-50/90 border-b border-slate-200 text-xs font-medium text-slate-600">
-                      <th className="py-3 px-5">Ref &amp; Date</th>
-                      <th className="py-3 px-4">Category</th>
-                      <th className="py-3 px-4">Description / Note</th>
-                      <th className="py-3 px-4">Method</th>
-                      <th className="py-3 px-4 text-right">Amount</th>
-                      <th className="py-3 px-5 text-right">Action</th>
+                      <th className="py-3 px-5">{t('common.refAndDate')}</th>
+                      <th className="py-3 px-4">
+                        {t('expenses.table.category')}
+                      </th>
+                      <th className="py-3 px-4">
+                        {t('expenses.table.description')}
+                      </th>
+                      <th className="py-3 px-4">{t('common.method')}</th>
+                      <th className="py-3 px-4 text-right">
+                        {t('common.amount')}
+                      </th>
+                      <th className="py-3 px-5 text-right">
+                        {t('common.action')}
+                      </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-200 text-sm">
@@ -813,7 +834,7 @@ export function ExpensesView({
                                 'bg-slate-100 text-slate-700 border-slate-200'
                               }`}
                             >
-                              {exp.category}
+                              {translateExpenseCategory(exp.category)}
                             </span>
                           </td>
                           <td className="py-3.5 px-4 text-xs text-slate-600 max-w-xs break-words">
@@ -826,7 +847,7 @@ export function ExpensesView({
                               ) : (
                                 <Banknote className="w-3.5 h-3.5 text-slate-400" />
                               )}
-                              {exp.paymentMethod}
+                              {translatePaymentMethod(exp.paymentMethod)}
                             </span>
                           </td>
                           <td className="py-3.5 px-4 text-right font-mono text-sm font-semibold tabular-nums text-red-700 whitespace-nowrap">
@@ -840,7 +861,7 @@ export function ExpensesView({
                                 className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded transition-colors cursor-pointer whitespace-nowrap"
                               >
                                 <RotateCcw className="w-3.5 h-3.5 shrink-0" />
-                                Correct / Adjust
+                                {t('common.correctAdjust')}
                               </button>
                             ) : (
                               <span className="text-xs text-slate-400">—</span>

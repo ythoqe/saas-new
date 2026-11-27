@@ -9,6 +9,7 @@ import {
   Trash2,
   Users,
 } from 'lucide-react';
+import { useLanguage } from '../contexts/LanguageContext';
 import type { ClientRecord, ClientWithLedgerSummary } from '../types/mill';
 import {
   formatCurrency,
@@ -23,6 +24,9 @@ type SortOption = 'newest' | 'due_desc' | 'name_asc';
 interface ClientManagementViewProps {
   summaries: ClientWithLedgerSummary[];
   isLoading: boolean;
+  isAdmin: boolean;
+  canCreateClient: boolean;
+  canManagePayments: boolean;
   onAddClient: () => void;
   onEditClient: (client: ClientRecord) => void;
   onDeleteClient: (client: ClientRecord) => void;
@@ -33,12 +37,16 @@ interface ClientManagementViewProps {
 export function ClientManagementView({
   summaries,
   isLoading,
+  isAdmin,
+  canCreateClient,
+  canManagePayments,
   onAddClient,
   onEditClient,
   onDeleteClient,
   onOpenLedger,
   onReceivePayment,
 }: ClientManagementViewProps) {
+  const { t, translateDueTone } = useLanguage();
   const [searchQuery, setSearchQuery] = useState('');
   const [dueFilter, setDueFilter] = useState<DueFilter>('all');
   const [sortBy, setSortBy] = useState<SortOption>('newest');
@@ -97,19 +105,23 @@ export function ClientManagementView({
       {/* KPI Strip — Single-elevation flat bordered strip */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 bg-white border border-slate-200 rounded-lg divide-y sm:divide-y-0 sm:divide-x divide-slate-200">
         <div className="p-5">
-          <p className="text-xs font-medium text-slate-500">Total Clients</p>
+          <p className="text-xs font-medium text-slate-500">
+            {t('clients.kpi.totalClients')}
+          </p>
           <p className="mt-2 font-mono text-2xl font-semibold tabular-nums text-slate-900">
             {isLoading ? '—' : aggregateStats.totalClients}
           </p>
           <p className="mt-1 text-xs text-slate-500">
             {isLoading
-              ? 'Loading registry...'
-              : `${aggregateStats.clientsWithDue} with active due`}
+              ? t('clients.kpi.loadingRegistry')
+              : `${aggregateStats.clientsWithDue} ${t('clients.kpi.withActiveDue')}`}
           </p>
         </div>
 
         <div className="p-5">
-          <p className="text-xs font-medium text-slate-500">Net Current Due</p>
+          <p className="text-xs font-medium text-slate-500">
+            {t('clients.kpi.netCurrentDue')}
+          </p>
           <p
             className={`mt-2 font-mono text-2xl font-semibold tabular-nums ${
               aggregateStats.totalDue > 0 ? 'text-red-700' : 'text-slate-900'
@@ -118,27 +130,31 @@ export function ClientManagementView({
             {isLoading ? '—' : formatCurrency(aggregateStats.totalDue)}
           </p>
           <p className="mt-1 text-xs text-slate-500">
-            Sum(Debit) − Sum(Credit) across ledger
+            {t('clients.kpi.dueFormula')}
           </p>
         </div>
 
         <div className="p-5">
-          <p className="text-xs font-medium text-slate-500">Total Ledger Debit</p>
+          <p className="text-xs font-medium text-slate-500">
+            {t('clients.kpi.totalDebit')}
+          </p>
           <p className="mt-2 font-mono text-2xl font-semibold tabular-nums text-slate-900">
             {isLoading ? '—' : formatCurrency(aggregateStats.totalDebit)}
           </p>
           <p className="mt-1 text-xs text-slate-500">
-            Opening dues & mill bills
+            {t('clients.kpi.debitSub')}
           </p>
         </div>
 
         <div className="p-5">
-          <p className="text-xs font-medium text-slate-500">Total Ledger Credit</p>
+          <p className="text-xs font-medium text-slate-500">
+            {t('clients.kpi.totalCredit')}
+          </p>
           <p className="mt-2 font-mono text-2xl font-semibold tabular-nums text-emerald-700">
             {isLoading ? '—' : formatCurrency(aggregateStats.totalCredit)}
           </p>
           <p className="mt-1 text-xs text-slate-500">
-            Payments & credit adjustments
+            {t('clients.kpi.creditSub')}
           </p>
         </div>
       </div>
@@ -153,7 +169,7 @@ export function ClientManagementView({
               type="search"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search by client name, company, or mobile..."
+              placeholder={t('clients.searchPlaceholder')}
               aria-label="Search clients"
               className="w-full pl-9 pr-3.5 py-2 text-sm text-slate-900 bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:bg-white focus:border-[#1e3a8a] focus:ring-1 focus:ring-[#1e3a8a]"
             />
@@ -168,9 +184,9 @@ export function ClientManagementView({
             >
               {(
                 [
-                  { id: 'all', label: 'All' },
-                  { id: 'with_due', label: 'With Due' },
-                  { id: 'settled', label: 'Settled' },
+                  { id: 'all', label: t('common.all') },
+                  { id: 'with_due', label: t('clients.filter.withDue') },
+                  { id: 'settled', label: t('common.settled') },
                 ] as const
               ).map((tab) => (
                 <button
@@ -197,9 +213,9 @@ export function ClientManagementView({
                 onChange={(e) => setSortBy(e.target.value as SortOption)}
                 className="text-xs font-medium text-slate-700 bg-transparent focus:outline-none cursor-pointer"
               >
-                <option value="newest">Newest First</option>
-                <option value="due_desc">Highest Due</option>
-                <option value="name_asc">Name (A–Z)</option>
+                <option value="newest">{t('clients.sort.newest')}</option>
+                <option value="due_desc">{t('clients.sort.highestDue')}</option>
+                <option value="name_asc">{t('clients.sort.nameAsc')}</option>
               </select>
             </div>
           </div>
@@ -228,29 +244,29 @@ export function ClientManagementView({
               <Users className="w-5 h-5" />
             </div>
             <h3 className="font-display text-base font-semibold text-slate-900">
-              No clients registered yet
+              {t('clients.empty.title')}
             </h3>
             <p className="text-sm text-slate-500 mt-1.5 max-w-md mx-auto">
-              Add your first dyeing or washing mill client along with any previous
-              opening due. Opening balances are posted automatically to{' '}
-              <span className="font-mono text-slate-700">client_ledger</span>.
+              {t('clients.empty.desc')}
             </p>
-            <button
-              type="button"
-              onClick={onAddClient}
-              className="mt-5 inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-[#1e3a8a] hover:bg-[#1e40af] rounded-md transition-colors cursor-pointer whitespace-nowrap"
-            >
-              <Plus className="w-4 h-4" />
-              Add First Client
-            </button>
+            {canCreateClient && (
+              <button
+                type="button"
+                onClick={onAddClient}
+                className="mt-5 inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-[#1e3a8a] hover:bg-[#1e40af] rounded-md transition-colors cursor-pointer whitespace-nowrap"
+              >
+                <Plus className="w-4 h-4" />
+                {t('clients.empty.cta')}
+              </button>
+            )}
           </div>
         ) : filteredSummaries.length === 0 ? (
           <div className="py-14 px-6 text-center">
             <p className="text-sm font-medium text-slate-900">
-              No matching clients found
+              {t('clients.empty.noMatch')}
             </p>
             <p className="text-xs text-slate-500 mt-1">
-              Try adjusting your search query or status filter.
+              {t('clients.empty.noMatchDesc')}
             </p>
             <button
               type="button"
@@ -260,7 +276,7 @@ export function ClientManagementView({
               }}
               className="mt-4 px-3.5 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-md transition-colors cursor-pointer"
             >
-              Clear Filters
+              {t('common.clearFilters')}
             </button>
           </div>
         ) : (
@@ -268,16 +284,18 @@ export function ClientManagementView({
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="bg-slate-50/90 border-b border-slate-200 text-xs font-medium text-slate-600">
-                  <th className="py-3 px-5">Client Name & Company</th>
-                  <th className="py-3 px-4">Mobile</th>
+                  <th className="py-3 px-5">{t('clients.table.nameCompany')}</th>
+                  <th className="py-3 px-4">{t('common.mobile')}</th>
                   <th className="py-3 px-4 text-right hidden md:table-cell">
-                    Total Debit
+                    {t('clients.table.totalDebit')}
                   </th>
                   <th className="py-3 px-4 text-right hidden md:table-cell">
-                    Total Credit
+                    {t('clients.table.totalCredit')}
                   </th>
-                  <th className="py-3 px-5 text-right">Current Due</th>
-                  <th className="py-3 px-5 text-right">Actions</th>
+                  <th className="py-3 px-5 text-right">
+                    {t('clients.table.currentDue')}
+                  </th>
+                  <th className="py-3 px-5 text-right">{t('common.actions')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200 text-sm">
@@ -325,11 +343,13 @@ export function ClientManagementView({
                           {formatCurrency(item.currentDue)}
                         </p>
                         <p className="text-[11px] text-slate-500 mt-0.5">
-                          <span>{status.label}</span>
+                          <span>{translateDueTone(status.tone)}</span>
                           <span aria-hidden="true"> · </span>
                           <span>
                             {item.entryCount}{' '}
-                            {item.entryCount === 1 ? 'txn' : 'txns'}
+                            {item.entryCount === 1
+                              ? t('common.txn')
+                              : t('common.txns')}
                           </span>
                           <span aria-hidden="true" className="hidden sm:inline">
                             {' '}
@@ -345,40 +365,46 @@ export function ClientManagementView({
                         onClick={(e) => e.stopPropagation()}
                       >
                         <div className="inline-flex items-center gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => onReceivePayment(item.client)}
-                            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-white bg-emerald-700 hover:bg-emerald-800 rounded-md transition-colors cursor-pointer whitespace-nowrap"
-                          >
-                            <Banknote className="w-3.5 h-3.5 shrink-0" />
-                            Receive Payment
-                          </button>
+                          {canManagePayments && (
+                            <button
+                              type="button"
+                              onClick={() => onReceivePayment(item.client)}
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-white bg-emerald-700 hover:bg-emerald-800 rounded-md transition-colors cursor-pointer whitespace-nowrap"
+                            >
+                              <Banknote className="w-3.5 h-3.5 shrink-0" />
+                              {t('clients.action.receivePayment')}
+                            </button>
+                          )}
                           <button
                             type="button"
                             onClick={() => onOpenLedger(item.client)}
                             className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-[#1e3a8a] bg-blue-50/70 hover:bg-blue-100/80 rounded-md transition-colors cursor-pointer whitespace-nowrap"
                           >
                             <BookOpen className="w-3.5 h-3.5" />
-                            Ledger
+                            {t('common.ledger')}
                           </button>
-                          <button
-                            type="button"
-                            onClick={() => onEditClient(item.client)}
-                            aria-label={`Edit ${item.client.clientName}`}
-                            title="Edit Client"
-                            className="p-1.5 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded-md transition-colors cursor-pointer"
-                          >
-                            <Edit2 className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => onDeleteClient(item.client)}
-                            aria-label={`Delete ${item.client.clientName}`}
-                            title="Delete Client"
-                            className="p-1.5 text-slate-500 hover:text-red-700 hover:bg-red-50 rounded-md transition-colors cursor-pointer"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                          {isAdmin && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => onEditClient(item.client)}
+                                aria-label={`Edit ${item.client.clientName}`}
+                                title={t('common.edit')}
+                                className="p-1.5 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded-md transition-colors cursor-pointer"
+                              >
+                                <Edit2 className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => onDeleteClient(item.client)}
+                                aria-label={`Delete ${item.client.clientName}`}
+                                title={t('common.delete')}
+                                className="p-1.5 text-slate-500 hover:text-red-700 hover:bg-red-50 rounded-md transition-colors cursor-pointer"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </>
+                          )}
                         </div>
                       </td>
                     </tr>

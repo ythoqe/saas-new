@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { doc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { ArrowLeft, Plus } from 'lucide-react';
+import { useLanguage } from '../contexts/LanguageContext';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import {
   FABRIC_TYPES,
@@ -33,6 +34,7 @@ export function NewOrderPage({
   onAddClient,
   onOrderCreated,
 }: NewOrderPageProps) {
+  const { t, translateOrderStatus } = useLanguage();
   const sortedClients = useMemo(
     () =>
       [...clients].sort((a, b) => a.clientName.localeCompare(b.clientName)),
@@ -172,7 +174,7 @@ export function NewOrderPage({
           className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-600 hover:text-slate-900 transition-colors cursor-pointer"
         >
           <ArrowLeft className="w-3.5 h-3.5" />
-          Back to Orders & Delivery
+          {t('orders.form.backToOrders')}
         </button>
       </div>
 
@@ -184,12 +186,10 @@ export function NewOrderPage({
         >
           <div className="px-6 py-4 border-b border-slate-200">
             <h2 className="font-display text-base font-semibold text-slate-900">
-              Order Intake Details
+              {t('orders.form.heading')}
             </h2>
             <p className="text-xs text-slate-500 mt-0.5">
-              Record grey fabric received for dyeing or washing. Final billing posts to{' '}
-              <span className="font-mono text-slate-700">client_ledger</span> upon
-              Complete &amp; Deliver.
+              {t('orders.form.subheading')}
             </p>
           </div>
 
@@ -210,7 +210,7 @@ export function NewOrderPage({
                   htmlFor="orderClient"
                   className="block text-sm font-medium text-slate-700"
                 >
-                  Client <span className="text-red-600">*</span>
+                  {t('orders.form.client')} <span className="text-red-600">*</span>
                 </label>
                 <button
                   type="button"
@@ -218,20 +218,20 @@ export function NewOrderPage({
                   className="inline-flex items-center gap-1 text-xs font-medium text-[#1e3a8a] hover:text-[#1e40af] cursor-pointer whitespace-nowrap"
                 >
                   <Plus className="w-3.5 h-3.5" />
-                  Add New Client
+                  {t('cta.addNewClient')}
                 </button>
               </div>
               {sortedClients.length === 0 ? (
                 <div className="p-4 bg-slate-50 border border-slate-200 rounded-md flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <p className="text-xs text-slate-600">
-                    No clients exist yet. Add a client before creating an order.
+                    {t('orders.form.noClients')}
                   </p>
                   <button
                     type="button"
                     onClick={onAddClient}
                     className="px-3 py-1.5 text-xs font-medium text-white bg-[#1e3a8a] hover:bg-[#1e40af] rounded-md transition-colors cursor-pointer whitespace-nowrap shrink-0"
                   >
-                    Create First Client
+                    {t('orders.form.createFirstClient')}
                   </button>
                 </div>
               ) : (
@@ -242,7 +242,7 @@ export function NewOrderPage({
                   onChange={(e) => setClientId(e.target.value)}
                   className="w-full px-3.5 py-2.5 text-sm text-slate-900 bg-white border border-slate-300 rounded-md focus:outline-none focus:border-[#1e3a8a] focus:ring-1 focus:ring-[#1e3a8a]"
                 >
-                  <option value="">Select a registered client...</option>
+                  <option value="">{t('orders.form.selectClient')}</option>
                   {sortedClients.map((client) => (
                     <option key={client.id} value={client.id}>
                       {client.clientName} — {client.companyName} ({client.mobile})
@@ -259,7 +259,7 @@ export function NewOrderPage({
                   htmlFor="orderDate"
                   className="block text-sm font-medium text-slate-700 mb-1.5"
                 >
-                  Order Date <span className="text-red-600">*</span>
+                  {t('orders.form.orderDate')} <span className="text-red-600">*</span>
                 </label>
                 <input
                   id="orderDate"
@@ -276,7 +276,7 @@ export function NewOrderPage({
                   htmlFor="fabricType"
                   className="block text-sm font-medium text-slate-700 mb-1.5"
                 >
-                  Fabric Type <span className="text-red-600">*</span>
+                  {t('orders.form.fabricType')} <span className="text-red-600">*</span>
                 </label>
                 <select
                   id="fabricType"
@@ -301,7 +301,7 @@ export function NewOrderPage({
                   htmlFor="greyFabricThan"
                   className="block text-sm font-medium text-slate-700 mb-1.5"
                 >
-                  Grey Fabric Than <span className="text-red-600">*</span>
+                  {t('orders.form.greyThan')} <span className="text-red-600">*</span>
                 </label>
                 <input
                   id="greyFabricThan"
@@ -322,7 +322,7 @@ export function NewOrderPage({
                   htmlFor="greyFabricGaj"
                   className="block text-sm font-medium text-slate-700 mb-1.5"
                 >
-                  Grey Fabric Gaj <span className="text-red-600">*</span>
+                  {t('orders.form.greyGaj')} <span className="text-red-600">*</span>
                 </label>
                 <input
                   id="greyFabricGaj"
@@ -343,7 +343,7 @@ export function NewOrderPage({
                   htmlFor="orderRate"
                   className="block text-sm font-medium text-slate-700 mb-1.5"
                 >
-                  Rate (per Gaj) <span className="text-red-600">*</span>
+                  {t('orders.form.ratePerGaj')} <span className="text-red-600">*</span>
                 </label>
                 <div className="relative">
                   <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-sm font-mono text-slate-500">
@@ -371,7 +371,7 @@ export function NewOrderPage({
                 htmlFor="orderStatus"
                 className="block text-sm font-medium text-slate-700 mb-1.5"
               >
-                Initial Status
+                {t('orders.form.initialStatus')}
               </label>
               <select
                 id="orderStatus"
@@ -383,13 +383,12 @@ export function NewOrderPage({
               >
                 {IN_PROGRESS_ORDER_STATUSES.map((s) => (
                   <option key={s} value={s}>
-                    {s}
+                    {translateOrderStatus(s)}
                   </option>
                 ))}
               </select>
               <p className="mt-1.5 text-xs text-slate-500">
-                Defaults to Processing. Mark as Delivered via Complete &amp; Deliver to
-                capture Final Gaj and post the invoice automatically.
+                {t('orders.form.statusHelp')}
               </p>
             </div>
           </div>
@@ -401,14 +400,14 @@ export function NewOrderPage({
               disabled={isSubmitting}
               className="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-md transition-colors cursor-pointer whitespace-nowrap"
             >
-              Cancel
+              {t('common.cancel')}
             </button>
             <button
               type="submit"
               disabled={isSubmitting || sortedClients.length === 0}
               className="px-5 py-2 text-sm font-medium text-white bg-[#1e3a8a] hover:bg-[#1e40af] disabled:opacity-60 disabled:cursor-not-allowed rounded-md transition-colors cursor-pointer whitespace-nowrap"
             >
-              {isSubmitting ? 'Creating Order...' : 'Create Order'}
+              {isSubmitting ? t('orders.form.creating') : t('orders.form.createOrder')}
             </button>
           </div>
         </form>
@@ -417,46 +416,58 @@ export function NewOrderPage({
         <aside className="bg-white border border-slate-200 rounded-lg p-6 space-y-5">
           <div>
             <h3 className="font-display text-sm font-semibold text-slate-900">
-              Live Intake Summary
+              {t('orders.form.summaryTitle')}
             </h3>
             <p className="text-xs text-slate-500 mt-0.5">
-              Estimate based on grey fabric intake measurements
+              {t('orders.form.summarySub')}
             </p>
           </div>
 
           <dl className="divide-y divide-slate-200 text-sm">
             <div className="py-3 flex items-center justify-between gap-4">
-              <dt className="text-xs text-slate-500">Selected Client</dt>
+              <dt className="text-xs text-slate-500">
+                {t('orders.form.selectedClient')}
+              </dt>
               <dd className="text-xs font-medium text-slate-900 text-right truncate max-w-[180px]">
-                {selectedClient ? selectedClient.clientName : 'Not selected'}
+                {selectedClient ? selectedClient.clientName : t('common.notSelected')}
               </dd>
             </div>
             <div className="py-3 flex items-center justify-between gap-4">
-              <dt className="text-xs text-slate-500">Fabric Type</dt>
+              <dt className="text-xs text-slate-500">
+                {t('orders.form.fabricType')}
+              </dt>
               <dd className="text-xs font-medium text-slate-900">{fabricType}</dd>
             </div>
             <div className="py-3 flex items-center justify-between gap-4">
-              <dt className="text-xs text-slate-500">Grey Fabric</dt>
+              <dt className="text-xs text-slate-500">
+                {t('orders.form.greyFabric')}
+              </dt>
               <dd className="font-mono text-xs tabular-nums text-slate-900">
-                {parsedThan > 0 ? `${formatNumber(parsedThan)} Than` : '—'} ·{' '}
-                {parsedGaj > 0 ? `${formatNumber(parsedGaj)} Gaj` : '—'}
+                {parsedThan > 0 ? `${formatNumber(parsedThan)} ${t('common.than')}` : '—'} ·{' '}
+                {parsedGaj > 0 ? `${formatNumber(parsedGaj)} ${t('common.gaj')}` : '—'}
               </dd>
             </div>
             <div className="py-3 flex items-center justify-between gap-4">
-              <dt className="text-xs text-slate-500">Avg. Gaj / Than</dt>
+              <dt className="text-xs text-slate-500">
+                {t('orders.form.avgGajThan')}
+              </dt>
               <dd className="font-mono text-xs tabular-nums text-slate-700">
-                {avgGajPerThan !== null ? `${formatNumber(avgGajPerThan)} Gaj` : '—'}
+                {avgGajPerThan !== null
+                  ? `${formatNumber(avgGajPerThan)} ${t('common.gaj')}`
+                  : '—'}
               </dd>
             </div>
             <div className="py-3 flex items-center justify-between gap-4">
-              <dt className="text-xs text-slate-500">Rate per Gaj</dt>
+              <dt className="text-xs text-slate-500">
+                {t('orders.form.rateLabel')}
+              </dt>
               <dd className="font-mono text-xs tabular-nums text-slate-900">
                 {parsedRate > 0 ? formatCurrency(parsedRate) : '—'}
               </dd>
             </div>
             <div className="pt-4 flex items-baseline justify-between gap-4">
               <dt className="text-xs font-medium text-slate-700">
-                Estimated Bill
+                {t('orders.form.estimatedBill')}
               </dt>
               <dd className="font-mono text-lg font-semibold tabular-nums text-slate-900">
                 {estimatedBill !== null ? formatCurrency(estimatedBill) : '৳0.00'}

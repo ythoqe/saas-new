@@ -7,6 +7,7 @@ import {
   writeBatch,
 } from 'firebase/firestore';
 import { Trash2, X } from 'lucide-react';
+import { useLanguage } from '../contexts/LanguageContext';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import {
   LEDGER_VALIDATION,
@@ -32,6 +33,7 @@ export function AddSupplierDrawer({
   onDeleteSupplier,
   onSuccess,
 }: AddSupplierDrawerProps) {
+  const { t } = useLanguage();
   const [supplierName, setSupplierName] = useState('');
   const [companyName, setCompanyName] = useState('');
   const [mobile, setMobile] = useState('');
@@ -220,12 +222,14 @@ export function AddSupplierDrawer({
               id="supplier-drawer-title"
               className="font-display text-lg font-semibold text-slate-900"
             >
-              {isEditing ? 'Edit Supplier Profile' : 'Add New Supplier'}
+              {isEditing
+                ? t('suppliers.form.editTitle')
+                : t('suppliers.form.addTitle')}
             </h2>
             <p className="text-xs text-slate-500 mt-0.5">
               {isEditing
-                ? 'Update vendor details without altering payable ledger history.'
-                : 'Register a dye, chemical, jute, or spare parts vendor.'}
+                ? t('suppliers.form.editSubtitle')
+                : t('suppliers.form.addSubtitle')}
             </p>
           </div>
           <button
@@ -255,7 +259,8 @@ export function AddSupplierDrawer({
                 htmlFor="supplierName"
                 className="block text-sm font-medium text-slate-700 mb-1.5"
               >
-                Supplier Name <span className="text-red-600">*</span>
+                {t('suppliers.form.supplierName')}{' '}
+                <span className="text-red-600">*</span>
               </label>
               <input
                 id="supplierName"
@@ -274,7 +279,8 @@ export function AddSupplierDrawer({
                 htmlFor="supplierCompany"
                 className="block text-sm font-medium text-slate-700 mb-1.5"
               >
-                Company Name <span className="text-red-600">*</span>
+                {t('suppliers.form.companyName')}{' '}
+                <span className="text-red-600">*</span>
               </label>
               <input
                 id="supplierCompany"
@@ -293,7 +299,7 @@ export function AddSupplierDrawer({
                 htmlFor="supplierMobile"
                 className="block text-sm font-medium text-slate-700 mb-1.5"
               >
-                Mobile <span className="text-red-600">*</span>
+                {t('common.mobile')} <span className="text-red-600">*</span>
               </label>
               <input
                 id="supplierMobile"
@@ -314,7 +320,7 @@ export function AddSupplierDrawer({
                   htmlFor="openingPayable"
                   className="block text-sm font-medium text-slate-700 mb-1.5"
                 >
-                  Opening Payable (Previous Debt)
+                  {t('suppliers.form.openingPayable')}
                 </label>
                 <div className="relative">
                   <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-sm font-mono text-slate-500">
@@ -357,7 +363,7 @@ export function AddSupplierDrawer({
                   className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-red-700 bg-red-50 border border-red-200 hover:bg-red-100 rounded-md transition-colors cursor-pointer whitespace-nowrap"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
-                  Delete Supplier
+                  {t('suppliers.form.deleteSupplier')}
                 </button>
               ) : null}
             </div>
@@ -368,7 +374,7 @@ export function AddSupplierDrawer({
                 disabled={isSubmitting}
                 className="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-md transition-colors cursor-pointer whitespace-nowrap"
               >
-                Cancel
+                {t('common.cancel')}
               </button>
               <button
                 type="submit"
@@ -376,10 +382,10 @@ export function AddSupplierDrawer({
                 className="px-4 py-2 text-sm font-medium text-white bg-[#1e3a8a] hover:bg-[#1e40af] disabled:opacity-60 rounded-md transition-colors cursor-pointer whitespace-nowrap"
               >
                 {isSubmitting
-                  ? 'Saving...'
+                  ? t('common.saving')
                   : isEditing
-                    ? 'Save Changes'
-                    : 'Save Supplier'}
+                    ? t('common.saveChanges')
+                    : t('suppliers.form.saveSupplier')}
               </button>
             </div>
           </div>

@@ -15,24 +15,26 @@
 9. **Atomic Purchase & Supplier Payment Outflow**: `/purchases/{purchaseId}` verifies `abs(totalAmount - quantity * rate) <= 0.02` and enforces atomic creation of `/supplier_ledger/{purchaseId}` (`txn_type == "purchase"`, `credit == totalAmount`, `debit == 0`). `/money_out/{paymentId}` is append-only, restricts `paymentMethod` to `Cash` | `Bank`, and for supplier payments (`SPAY-*`) enforces atomic creation of `/supplier_ledger/{paymentId}` (`txn_type == "payment"`, `debit == amount`, `credit == 0`).
 10. **Atomic Factory Expense & Cash Outflow Integrity**: `/expenses/{expenseId}` is append-only (`allow update, delete: if false`), restricts `category` to `Salary` | `Electricity` | `Rent` | `Transport` | `Maintenance` | `Food` | `Office` | `Other`, restricts `paymentMethod` to `Cash` | `Bank`, enforces `reference == expenseId` matching `^EXP-[a-zA-Z0-9_\-]+$`, and requires bidirectional atomic creation (`existsAfter` / `getAfter`) of `/money_out/{expenseId}` with identical `ownerId`, `reference`, `category`, `amount`, `paymentDate == expenseDate`, and `paymentMethod`.
 11. **Inventory Stock Bounds & Atomic Movement Integrity**: `/inventory/{itemId}` enforces non-negative bounded `currentStock` and `minStockLevel`, restricts `unit` to `KG` | `Liter` | `Pcs`, locks `itemName`/`unit`/`ownerId`/`createdAt` after creation, and only permits action-based updates to `['currentStock', 'updatedAt']` or `['minStockLevel', 'updatedAt']`. `/stock_movements/{movementId}` is append-only (`allow update, delete: if false`), verifies arithmetic consistency (`opening`, `in`/`purchase`, `out`), and enforces via `existsAfter` / `getAfter` that the parent `/inventory/{inventoryItemId}` exists, belongs to `request.auth.uid`, has a matching `unit`, and ends with `currentStock == resultingStock`.
-12. **Employee PII Isolation & Atomic Weekly Advance Outflow Integrity**: `/employees/{employeeId}` stores PII (`mobile`, `basicSalary`) and strictly isolates `get` and `list` to `request.auth.uid == ownerId`. `/employee_advances/{advanceId}` is append-only (`allow update, delete: if false`), enforces `reference == advanceId` matching `^ADV-[a-zA-Z0-9_\-]+$`, verifies that the referenced `/employees/{employeeId}` exists and belongs to `request.auth.uid`, and requires bidirectional atomic creation (`existsAfter` / `getAfter`) of `/money_out/{advanceId}` with `category == "Employee Advance"`, matching `ownerId`, `employeeId`, `reference`, `amount`, `paymentDate == advanceDate`, and `paymentMethod`.
+12. **Employee PII Isolation & Atomic Weekly Advance Outflow Integrity**: `/employees/{employeeId}` stores PII (`mobile`, `basicSalary`) and is strictly restricted to `admin`. `/employee_advances/{advanceId}` is append-only (`allow update, delete: if false`), restricted to `admin`, enforces `reference == advanceId` matching `^ADV-[a-zA-Z0-9_\-]+$`, verifies that `/employees/{employeeId}` exists, and requires bidirectional atomic creation (`existsAfter` / `getAfter`) of `/money_out/{advanceId}` with `category == "Employee Advance"`.
+13. **Role-Based Access Control (RBAC) & First User Lock**:
+    - `/users/{userId}` stores `uid`, `email`, `displayName`, `role` (`admin` | `manager` | `accountant`), `createdAt`, `updatedAt`. `get` is strictly restricted to `request.auth.uid == userId || isAdmin()`. `list` and role `update` are strictly restricted to `isAdmin()`.
+    - First User Rule: Creating `/users/{uid}` with `role == "admin"` is ONLY permitted if `isBootstrappedAdmin()` (verified runtime admin email) OR atomically paired with creating the immutable singleton `/app_meta/bootstrap` when it does not yet exist. All subsequent users MUST register with `role == "manager"` and CANNOT elevate their own role.
+    - Role Enforcement across Collections:
+      - `money_in`, `money_out`, `expenses`: strictly `admin` and `accountant`.
+      - `orders`, `purchases`, `inventory`, `stock_movements`: strictly `admin` and `manager`.
+      - `employees`, `employee_advances`, `users` list/role updates: strictly `admin`.
+      - Master Data edits/deletes (`clients`, `suppliers`, `inventory`, `employees`) and pending/processing transaction edits/deletes (`orders`, `purchases`): strictly `admin`.
 
 ## 2. Adversarial Payloads (Must All Return PERMISSION_DENIED)
-1. **Unauthenticated Read/Write** on `/clients`, `/client_ledger`, `/orders`, `/expenses`, `/money_out`, `/inventory`, `/stock_movements`, `/employees`, or `/employee_advances`.
-2. **Unverified Email Spoofing** (`email_verified == false`).
-3. **Cross-Tenant PII Read (GET)** on `/clients/{userA_client}`, `/orders/{userA_order}`, `/expenses/{userA_expense}`, `/inventory/{userA_item}`, or `/employees/{userA_employee}`.
-4. **Unfiltered Collection Scrape (LIST)** without `where('ownerId', '==', uid)`.
-5. **Identity Spoofing** (`ownerId != request.auth.uid`).
-6. **Shadow Field Injection** (`balance` on `/clients`, or extra fields on `/orders`, `/expenses`, `/money_out`, `/inventory`, `/stock_movements`, `/employees`, or `/employee_advances`).
-7. **ID Poisoning** (`bad$id with spaces` or > 128 chars).
-8. **Backdated Timestamps** (`createdAt != request.time`).
-9. **Orphaned Order / Ledger Entry** referencing a missing or cross-owner `clientId`.
-10. **Creating Order Directly as Delivered** (bypassing Complete & Deliver).
-11. **Delivering Order Without Atomic Invoice Ledger Entry or Forged Bill Amount** (`finalBillAmount != finalGaj * rate`, or missing `client_ledger/INV_{orderId}`).
-12. **Double-Delivery / Post-Delivery Mutation / Ledger History Tampering** (updating a `Delivered` order or mutating/deleting `client_ledger`, `expenses`, `money_out`, `stock_movements`, or `employee_advances`).
-13. **Orphaned Expense or Mismatched MoneyOut Batch** (creating `/expenses/EXP-123` without atomic `/money_out/EXP-123`, or mismatching `amount`/`paymentMethod`, or using an invalid expense category).
-14. **Negative Inventory Stock or Desynced Stock Movement** (updating `currentStock < 0`, mutating `unit`/`itemName` on `/inventory`, or creating a `/stock_movements` entry whose `resultingStock` disagrees with `previousStock ± quantity` or with `getAfter(/inventory/{id}).currentStock`).
-15. **Orphaned Employee Advance or Unpaired Cash Outflow** (creating `/employee_advances/ADV-123` without atomic `/money_out/ADV-123` with `category == "Employee Advance"`, referencing another owner's `employeeId`, or mutating/deleting an advance record).
-
-
-
+1. **Unauthenticated Read/Write** on `/users`, `/app_meta`, `/clients`, `/client_ledger`, `/orders`, `/expenses`, `/money_in`, `/money_out`, `/inventory`, `/stock_movements`, `/employees`, or `/employee_advances`.
+2. **Unverified Email Spoofing** (`email_verified == false`, even with admin email).
+3. **Self-Assigned Admin Escalation** (a second user creating `/users/{uid}` with `role: "admin"` after `/app_meta/bootstrap` already exists, or a manager updating their own `/users/{uid}` `role` field to `"admin"`).
+4. **Non-Admin User Directory PII Read** (Manager or Accountant attempting `get` on another user's `/users/{otherUid}` or `list` on `/users`).
+5. **Manager Writing Cash Collections** (Manager attempting `create` or `read` on `/money_in`, `/money_out`, or `/expenses`).
+6. **Accountant Accessing Operations/Inventory** (Accountant attempting `read` or `write` on `/orders`, `/purchases`, `/inventory`, or `/stock_movements`).
+7. **Non-Admin Master Data Edit/Delete** (Manager or Accountant attempting `update` or `delete` on `/clients`, `/suppliers`, `/orders` details, `/purchases` details, `/inventory` metadata, or `/employees`).
+8. **Identity Spoofing on Create** (`ownerId != request.auth.uid` or `users/{uid}` where `data.uid != request.auth.uid`).
+9. **Shadow Field Injection** (`balance` on `/clients`, `isSuperAdmin: true` on `/users`, or extra fields on any entity).
+10. **ID Poisoning & Backdated Timestamps** (`bad$id with spaces`, > 128 chars, or `createdAt != request.time`).
+11. **Bootstrap Tampering** (updating or deleting `/app_meta/bootstrap` or creating `/app_meta/other`).
+12. **Terminal State / Immutable Ledger Tampering** (updating a `Delivered` order or `Paid` purchase, or mutating/deleting `client_ledger`, `supplier_ledger`, `money_in`, `money_out`, `expenses`, `stock_movements`, or `employee_advances`).

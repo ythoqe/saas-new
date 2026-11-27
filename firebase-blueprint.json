@@ -843,12 +843,85 @@
         "note",
         "createdAt"
       ]
+    },
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Stores authenticated user profiles and Role-Based Access Control (RBAC) assignments (admin, manager, accountant).",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 254,
+          "format": "email"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 120
+        },
+        "role": {
+          "type": "string",
+          "enum": ["admin", "manager", "accountant"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "uid",
+        "email",
+        "displayName",
+        "role",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "RbacBootstrap": {
+      "title": "RbacBootstrap",
+      "description": "Singleton sentinel document locking the First User Admin assignment so only the very first registrant can atomically claim admin.",
+      "type": "object",
+      "properties": {
+        "firstAdminUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "initializedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "firstAdminUid",
+        "initializedAt"
+      ]
     }
   },
   "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Stores user profiles and RBAC roles (admin, manager, accountant). Readable by self or admin; listable and role-updatable only by admin."
+    },
+    "/app_meta/{metaId}": {
+      "schema": { "$ref": "#/entities/RbacBootstrap" },
+      "description": "Stores singleton bootstrap sentinel (/app_meta/bootstrap) ensuring only the first user can self-bootstrap admin."
+    },
     "/clients/{clientId}": {
       "schema": { "$ref": "#/entities/Client" },
-      "description": "Stores mill client contact profiles owned by authenticated operators. Does not store a balance field."
+      "description": "Stores mill client contact profiles. Does not store a balance field. Edit/delete restricted to admin."
     },
     "/client_ledger/{entryId}": {
       "schema": { "$ref": "#/entities/ClientLedgerEntry" },
@@ -856,15 +929,15 @@
     },
     "/orders/{orderId}": {
       "schema": { "$ref": "#/entities/Order" },
-      "description": "Mill dyeing and washing orders tracking grey fabric intake, processing stage, final delivered gaj, and atomic invoice billing."
+      "description": "Mill dyeing and washing orders accessible to admin and manager. Edit/delete restricted to admin while Processing."
     },
     "/money_in/{paymentId}": {
       "schema": { "$ref": "#/entities/MoneyInRecord" },
-      "description": "Append-only cash, bank, and mobile banking payment receipt records paired atomically with client_ledger payment credits."
+      "description": "Append-only cash, bank, and mobile banking payment receipts restricted to admin and accountant."
     },
     "/suppliers/{supplierId}": {
       "schema": { "$ref": "#/entities/Supplier" },
-      "description": "Stores mill vendor/supplier profiles owned by authenticated operators. Does not store a payable balance field."
+      "description": "Stores mill vendor/supplier profiles. Does not store a payable balance field. Edit/delete restricted to admin."
     },
     "/supplier_ledger/{entryId}": {
       "schema": { "$ref": "#/entities/SupplierLedgerEntry" },
@@ -872,31 +945,31 @@
     },
     "/purchases/{purchaseId}": {
       "schema": { "$ref": "#/entities/Purchase" },
-      "description": "Append-only inventory purchase records atomically paired with supplier_ledger credit entries."
+      "description": "Supplier purchase records accessible to admin and manager. Edit/delete restricted to admin while Pending."
     },
     "/money_out/{paymentId}": {
       "schema": { "$ref": "#/entities/MoneyOutRecord" },
-      "description": "Append-only cash/bank outflows atomically paired with supplier_ledger debit entries (SPAY-*), factory expenses (EXP-*), or employee advances (ADV-*)."
+      "description": "Append-only cash/bank outflows restricted to admin and accountant."
     },
     "/expenses/{expenseId}": {
       "schema": { "$ref": "#/entities/Expense" },
-      "description": "Append-only daily factory operating expenses atomically paired with money_out cash/bank outflow documents."
+      "description": "Append-only daily factory operating expenses restricted to admin and accountant."
     },
     "/inventory/{itemId}": {
       "schema": { "$ref": "#/entities/InventoryItem" },
-      "description": "Tracks mill chemicals, jute, dyes, and spare parts with live currentStock and minimum stock alert thresholds."
+      "description": "Mill chemicals, jute, dyes, and spare parts accessible to admin and manager. Master edit/delete restricted to admin."
     },
     "/stock_movements/{movementId}": {
       "schema": { "$ref": "#/entities/StockMovement" },
-      "description": "Append-only stock movement audit log for opening balances, Stock In, Stock Out, and Purchase In additions."
+      "description": "Append-only stock movement audit log accessible to admin and manager."
     },
     "/employees/{employeeId}": {
       "schema": { "$ref": "#/entities/Employee" },
-      "description": "Stores mill employee profiles, departments, joining dates, and basic monthly salaries."
+      "description": "Mill employee profiles restricted to admin."
     },
     "/employee_advances/{advanceId}": {
       "schema": { "$ref": "#/entities/EmployeeAdvance" },
-      "description": "Append-only weekly advance log per employee atomically paired with money_out outflows (ADV-*)."
+      "description": "Append-only weekly advance log per employee restricted to admin."
     }
   }
 }

@@ -8,6 +8,7 @@ import {
   Package,
   PlusCircle,
   Receipt,
+  Shield,
   ShoppingCart,
   Truck,
   UserCheck,
@@ -15,12 +16,15 @@ import {
   X,
 } from 'lucide-react';
 import type { User } from 'firebase/auth';
-import type { NavSection } from '../types/mill';
+import { useLanguage } from '../contexts/LanguageContext';
+import type { NavSection, UserRole } from '../types/mill';
+import { canAccessSection, getRoleBadgeClasses } from '../utils/rbac';
 
 interface SidebarProps {
   activeSection: NavSection;
   onSelectSection: (section: NavSection) => void;
   user: User;
+  userRole: UserRole;
   onSignOut: () => void;
   clientCount: number;
   orderCount: number;
@@ -31,6 +35,7 @@ interface SidebarProps {
   expenseCount: number;
   employeeCount: number;
   ledgerCount: number;
+  userCount: number;
   mobileOpen: boolean;
   onCloseMobile: () => void;
 }
@@ -39,6 +44,7 @@ export function Sidebar({
   activeSection,
   onSelectSection,
   user,
+  userRole,
   onSignOut,
   clientCount,
   orderCount,
@@ -49,10 +55,15 @@ export function Sidebar({
   expenseCount,
   employeeCount,
   ledgerCount,
+  userCount,
   mobileOpen,
   onCloseMobile,
 }: SidebarProps) {
-  const navGroups: {
+  const { t, translateRole } = useLanguage();
+
+  const isAccountant = userRole === 'accountant';
+
+  const allNavGroups: {
     heading: string;
     items: {
       id: NavSection;
@@ -63,60 +74,60 @@ export function Sidebar({
     }[];
   }[] = [
     {
-      heading: 'Overview',
+      heading: t('nav.group.overview'),
       items: [
         {
           id: 'overview',
-          label: 'Dashboard Overview',
+          label: t('nav.overview'),
           icon: LayoutDashboard,
         },
       ],
     },
     {
-      heading: 'Receivables & Orders',
+      heading: t('nav.group.receivables'),
       items: [
         {
           id: 'clients',
-          label: 'Client Management',
+          label: isAccountant ? t('nav.clientPayments') : t('nav.clients'),
           icon: Users,
           count: clientCount,
         },
         {
           id: 'orders',
-          label: 'Orders & Delivery',
+          label: t('nav.orders'),
           icon: ClipboardList,
           count: orderCount,
         },
         {
           id: 'new-order',
-          label: 'New Order',
+          label: t('nav.newOrder'),
           icon: PlusCircle,
         },
       ],
     },
     {
-      heading: 'Payables & Inventory',
+      heading: t('nav.group.payables'),
       items: [
         {
           id: 'suppliers',
-          label: 'Suppliers',
+          label: isAccountant ? t('nav.supplierPayments') : t('nav.suppliers'),
           icon: Truck,
           count: supplierCount,
         },
         {
           id: 'purchases',
-          label: 'Purchases',
+          label: t('nav.purchases'),
           icon: Package,
           count: purchaseCount,
         },
         {
           id: 'new-purchase',
-          label: 'New Purchase',
+          label: t('nav.newPurchase'),
           icon: ShoppingCart,
         },
         {
           id: 'inventory',
-          label: 'Inventory',
+          label: t('nav.inventory'),
           icon: Boxes,
           count: inventoryCount,
           alertCount: lowStockCount,
@@ -124,34 +135,52 @@ export function Sidebar({
       ],
     },
     {
-      heading: 'Staff & Factory Costs',
+      heading: t('nav.group.staffCosts'),
       items: [
         {
           id: 'employees',
-          label: 'Employees',
+          label: t('nav.employees'),
           icon: UserCheck,
           count: employeeCount,
         },
         {
           id: 'expenses',
-          label: 'Expenses',
+          label: t('nav.expenses'),
           icon: Receipt,
           count: expenseCount,
         },
       ],
     },
     {
-      heading: 'Reports & Ledgers',
+      heading: t('nav.group.reports'),
       items: [
         {
           id: 'ledger',
-          label: 'Client Ledger Book',
+          label: t('nav.ledger'),
           icon: BookOpen,
           count: ledgerCount,
         },
       ],
     },
+    {
+      heading: t('nav.group.admin'),
+      items: [
+        {
+          id: 'users',
+          label: t('nav.users'),
+          icon: Shield,
+          count: userCount,
+        },
+      ],
+    },
   ];
+
+  const navGroups = allNavGroups
+    .map((group) => ({
+      ...group,
+      items: group.items.filter((item) => canAccessSection(userRole, item.id)),
+    }))
+    .filter((group) => group.items.length > 0);
 
   const handleNavClick = (id: NavSection) => {
     onSelectSection(id);
@@ -212,10 +241,10 @@ export function Sidebar({
                   <span className="flex items-center gap-2 shrink-0">
                     {typeof item.alertCount === 'number' && item.alertCount > 0 && (
                       <span
-                        title={`${item.alertCount} low stock alert(s)`}
+                        title={`${item.alertCount} ${t('inventory.kpi.lowStockAlerts')}`}
                         className="px-1.5 py-0.5 rounded bg-red-600 text-[10px] font-mono font-semibold text-white tabular-nums leading-none"
                       >
-                        {item.alertCount} low
+                        {item.alertCount} {t('common.low')}
                       </span>
                     )}
                     {typeof item.count === 'number' && (
@@ -251,9 +280,18 @@ export function Sidebar({
             </div>
           )}
           <div className="min-w-0 flex-1">
-            <p className="text-sm font-medium text-white truncate">
-              {user.displayName || 'Mill Operator'}
-            </p>
+            <div className="flex items-center gap-1.5 min-w-0">
+              <p className="text-sm font-medium text-white truncate">
+                {user.displayName || t('nav.millOperator')}
+              </p>
+              <span
+                className={`px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide rounded shrink-0 ${getRoleBadgeClasses(
+                  userRole
+                )}`}
+              >
+                {translateRole(userRole)}
+              </span>
+            </div>
             <p className="text-xs text-slate-400 truncate">{user.email}</p>
           </div>
         </div>
@@ -263,7 +301,7 @@ export function Sidebar({
           className="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs font-medium text-slate-300 hover:text-white bg-slate-800/60 hover:bg-slate-800 border border-slate-700/80 rounded-md transition-colors cursor-pointer whitespace-nowrap"
         >
           <LogOut className="w-3.5 h-3.5" />
-          Sign Out
+          {t('nav.signOut')}
         </button>
       </div>
     </div>

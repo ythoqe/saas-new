@@ -28,8 +28,44 @@ service cloud.firestore {
       return resource.data;
     }
 
-    function isOwner(ownerId) {
-      return isVerifiedUser() && ownerId == request.auth.uid;
+    // RBAC Role Helpers (Always verified from Firestore /users/{uid}, never client claims)
+    function isBootstrappedAdmin() {
+      return isVerifiedUser()
+        && request.auth.token.email == 'hmmojjammalhoq@gmail.com';
+    }
+
+    function hasUserProfile() {
+      return isVerifiedUser()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function getUserRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+
+    function isAdmin() {
+      return isBootstrappedAdmin()
+        || (hasUserProfile() && getUserRole() == 'admin');
+    }
+
+    function isManager() {
+      return hasUserProfile() && getUserRole() == 'manager';
+    }
+
+    function isAccountant() {
+      return hasUserProfile() && getUserRole() == 'accountant';
+    }
+
+    function isAdminOrManager() {
+      return isAdmin() || isManager();
+    }
+
+    function isAdminOrAccountant() {
+      return isAdmin() || isAccountant();
+    }
+
+    function isMillStaff() {
+      return isAdmin() || isManager() || isAccountant();
     }
 
     function isPositiveBoundedNumber(val, maxVal) {
@@ -60,6 +96,52 @@ service cloud.firestore {
         ];
     }
 
+    // Validation Blueprint: UserProfile entity
+    function isValidUserProfile(data) {
+      return data.keys().hasAll([
+          'uid',
+          'email',
+          'displayName',
+          'role',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'uid',
+          'email',
+          'displayName',
+          'role',
+          'createdAt',
+          'updatedAt'
+        ])
+        && isValidId(data.uid)
+        && data.email is string
+        && data.email.size() >= 3
+        && data.email.size() <= 254
+        && data.displayName is string
+        && data.displayName.size() <= 120
+        && data.role is string
+        && data.role.size() >= 5
+        && data.role.size() <= 10
+        && data.role in ['admin', 'manager', 'accountant']
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    // Validation Blueprint: RbacBootstrap singleton
+    function isValidBootstrapMeta(data) {
+      return data.keys().hasAll([
+          'firstAdminUid',
+          'initializedAt'
+        ])
+        && data.keys().hasOnly([
+          'firstAdminUid',
+          'initializedAt'
+        ])
+        && isValidId(data.firstAdminUid)
+        && data.initializedAt is timestamp;
+    }
+
     // Validation Blueprint: Client entity
     function isValidClient(data) {
       return data.keys().hasAll([
@@ -81,7 +163,6 @@ service cloud.firestore {
           'updatedAt'
         ])
         && isValidId(data.ownerId)
-        && data.ownerId == request.auth.uid
         && data.clientName is string
         && data.clientName.size() >= 1
         && data.clientName.size() <= 120
@@ -174,7 +255,6 @@ service cloud.firestore {
           'updatedAt'
         ])
         && isValidId(data.ownerId)
-        && data.ownerId == request.auth.uid
         && isValidId(data.clientId)
         && data.orderDate is string
         && data.orderDate.size() == 10
@@ -315,7 +395,6 @@ service cloud.firestore {
           'updatedAt'
         ])
         && isValidId(data.ownerId)
-        && data.ownerId == request.auth.uid
         && data.supplierName is string
         && data.supplierName.size() >= 1
         && data.supplierName.size() <= 120
@@ -403,7 +482,6 @@ service cloud.firestore {
           'updatedAt'
         ])
         && isValidId(data.ownerId)
-        && data.ownerId == request.auth.uid
         && isValidId(data.supplierId)
         && isValidId(data.ledgerEntryId)
         && data.reference is string
@@ -679,7 +757,6 @@ service cloud.firestore {
           'updatedAt'
         ])
         && isValidId(data.ownerId)
-        && data.ownerId == request.auth.uid
         && data.itemName is string
         && data.itemName.size() >= 1
         && data.itemName.size() <= 120
@@ -776,7 +853,6 @@ service cloud.firestore {
           'updatedAt'
         ])
         && isValidId(data.ownerId)
-        && data.ownerId == request.auth.uid
         && data.name is string
         && data.name.size() >= 1
         && data.name.size() <= 120
@@ -850,25 +926,100 @@ service cloud.firestore {
         && data.createdAt is timestamp;
     }
 
-    // Collection: /clients/{clientId} (Master Data: Edit & Hard Delete Allowed by Owner)
+    // Collection: /app_meta/{metaId} (First-User Admin Bootstrap Sentinel)
+    match /app_meta/{metaId} {
+      allow get: if isVerifiedUser()
+        && metaId == 'bootstrap';
+
+      allow list: if false;
+
+      allow create: if isVerifiedUser()
+        && metaId == 'bootstrap'
+        && isValidBootstrapMeta(incoming())
+        && incoming().firstAdminUid == request.auth.uid
+        && incoming().initializedAt == request.time
+        && !exists(/databases/$(database)/documents/app_meta/bootstrap);
+
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    // Collection: /users/{userId} (User Profiles & RBAC Roles — PII Isolated to Self or Admin)
+    match /users/{userId} {
+      allow get: if isVerifiedUser()
+        && isValidId(userId)
+        && (request.auth.uid == userId || isAdmin());
+
+      allow list: if isAdmin();
+
+      allow create: if isVerifiedUser()
+        && isValidId(userId)
+        && userId == request.auth.uid
+        && isValidUserProfile(incoming())
+        && incoming().uid == request.auth.uid
+        && incoming().email == request.auth.token.email
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && (
+          // Standard sign-up default role (cannot self-assign admin)
+          incoming().role == 'manager'
+          || (
+            // First User Rule OR Runtime Bootstrapped Admin
+            incoming().role == 'admin'
+            && (
+              isBootstrappedAdmin()
+              || (
+                !exists(/databases/$(database)/documents/app_meta/bootstrap)
+                && existsAfter(/databases/$(database)/documents/app_meta/bootstrap)
+                && getAfter(/databases/$(database)/documents/app_meta/bootstrap).data.firstAdminUid == request.auth.uid
+              )
+            )
+          )
+        );
+
+      allow update: if isVerifiedUser()
+        && isValidId(userId)
+        && isValidUserProfile(incoming())
+        && incoming().uid == existing().uid
+        && incoming().email == existing().email
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          // Action 1: Admin changes a user's RBAC role
+          (
+            isAdmin()
+            && incoming().diff(existing()).affectedKeys().hasOnly(['role', 'updatedAt'])
+          ) || (
+            // Action 2: User refreshes their own displayName (role strictly locked)
+            request.auth.uid == userId
+            && incoming().role == existing().role
+            && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'updatedAt'])
+          )
+        );
+
+      allow delete: if false;
+    }
+
+    // Collection: /clients/{clientId} (Read: All Mill Staff | Create: Admin/Manager | Edit/Delete: Admin ONLY)
     match /clients/{clientId} {
       allow get: if isVerifiedUser()
         && isValidId(clientId)
-        && isOwner(existing().ownerId);
+        && isMillStaff();
 
-      allow list: if isVerifiedUser()
-        && existing().ownerId == request.auth.uid;
+      allow list: if isMillStaff();
 
       allow create: if isVerifiedUser()
         && isValidId(clientId)
         && isValidClient(incoming())
+        && incoming().ownerId == request.auth.uid
         && incoming().createdAt == request.time
-        && incoming().updatedAt == request.time;
+        && incoming().updatedAt == request.time
+        && isAdminOrManager();
 
       allow update: if isVerifiedUser()
         && isValidId(clientId)
         && isValidClient(incoming())
-        && isOwner(existing().ownerId)
+        && isAdmin()
         && incoming().ownerId == existing().ownerId
         && incoming().createdAt == existing().createdAt
         && incoming().updatedAt == request.time
@@ -882,27 +1033,29 @@ service cloud.firestore {
 
       allow delete: if isVerifiedUser()
         && isValidId(clientId)
-        && isOwner(existing().ownerId);
+        && isAdmin();
     }
 
     // Collection: /client_ledger/{entryId} (Append-Only Client Transaction Log — Immutable)
     match /client_ledger/{entryId} {
       allow get: if isVerifiedUser()
         && isValidId(entryId)
-        && isOwner(existing().ownerId);
+        && isMillStaff();
 
-      allow list: if isVerifiedUser()
-        && existing().ownerId == request.auth.uid;
+      allow list: if isMillStaff();
 
       allow create: if isVerifiedUser()
         && isValidId(entryId)
         && isValidLedgerEntry(incoming())
         && incoming().createdAt == request.time
         && (
-          (
-            existsAfter(/databases/$(database)/documents/clients/$(incoming().clientId))
-            && getAfter(/databases/$(database)/documents/clients/$(incoming().clientId)).data.ownerId == request.auth.uid
-          ) || (
+          isAdmin()
+          || (isManager() && incoming().txn_type in ['opening', 'invoice'])
+          || (isAccountant() && incoming().txn_type in ['payment', 'adjustment', 'invoice'])
+        )
+        && (
+          existsAfter(/databases/$(database)/documents/clients/$(incoming().clientId))
+          || (
             incoming().txn_type == 'adjustment'
             && !existsAfter(/databases/$(database)/documents/clients/$(incoming().clientId))
           )
@@ -912,37 +1065,37 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // Collection: /orders/{orderId} (Editable & Deletable ONLY while not Delivered; Delivered is Terminal)
+    // Collection: /orders/{orderId} (Admin & Manager ONLY | Edit Details & Delete: Admin ONLY while Processing)
     match /orders/{orderId} {
       allow get: if isVerifiedUser()
         && isValidId(orderId)
-        && isOwner(existing().ownerId);
+        && isAdminOrManager();
 
-      allow list: if isVerifiedUser()
-        && existing().ownerId == request.auth.uid;
+      allow list: if isAdminOrManager();
 
       allow create: if isVerifiedUser()
         && isValidId(orderId)
         && isValidOrder(incoming())
+        && incoming().ownerId == request.auth.uid
         && incoming().status != 'Delivered'
         && incoming().createdAt == request.time
         && incoming().updatedAt == request.time
-        && exists(/databases/$(database)/documents/clients/$(incoming().clientId))
-        && get(/databases/$(database)/documents/clients/$(incoming().clientId)).data.ownerId == request.auth.uid;
+        && isAdminOrManager()
+        && exists(/databases/$(database)/documents/clients/$(incoming().clientId));
 
       allow update: if isVerifiedUser()
         && isValidId(orderId)
         && isValidOrder(incoming())
-        && isOwner(existing().ownerId)
         && existing().status != 'Delivered'
         && incoming().ownerId == existing().ownerId
         && incoming().clientId == existing().clientId
         && incoming().createdAt == existing().createdAt
         && incoming().updatedAt == request.time
         && (
-          // Action 1: Update production stage while in progress
+          // Action 1: Admin or Manager updates production stage while in progress
           (
-            incoming().status != 'Delivered'
+            isAdminOrManager()
+            && incoming().status != 'Delivered'
             && incoming().orderDate == existing().orderDate
             && incoming().fabricType == existing().fabricType
             && incoming().greyFabricThan == existing().greyFabricThan
@@ -950,8 +1103,9 @@ service cloud.firestore {
             && incoming().rate == existing().rate
             && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt'])
           ) || (
-            // Action 2: Edit order details while Processing
-            existing().status == 'Processing'
+            // Action 2: Admin ONLY edits order details while Processing
+            isAdmin()
+            && existing().status == 'Processing'
             && incoming().status == 'Processing'
             && incoming().diff(existing()).affectedKeys().hasOnly([
               'orderDate',
@@ -962,8 +1116,9 @@ service cloud.firestore {
               'updatedAt'
             ])
           ) || (
-            // Action 3: Complete & Deliver with atomic client_ledger invoice creation
-            incoming().status == 'Delivered'
+            // Action 3: Admin or Manager completes & delivers with atomic client_ledger invoice
+            isAdminOrManager()
+            && incoming().status == 'Delivered'
             && incoming().orderDate == existing().orderDate
             && incoming().fabricType == existing().fabricType
             && incoming().greyFabricThan == existing().greyFabricThan
@@ -988,21 +1143,20 @@ service cloud.firestore {
           )
         );
 
-      // Delete allowed ONLY while status is Processing (never once Delivered)
+      // Delete allowed ONLY by Admin while status is Processing (never once Delivered)
       allow delete: if isVerifiedUser()
         && isValidId(orderId)
-        && isOwner(existing().ownerId)
-        && existing().status == 'Processing';
+        && existing().status == 'Processing'
+        && isAdmin();
     }
 
-    // Collection: /money_in/{paymentId} (Append-Only Client Receipt OR Cash Reversal Inflow — Immutable)
+    // Collection: /money_in/{paymentId} (Strictly Admin & Accountant ONLY — Append-Only Immutable)
     match /money_in/{paymentId} {
       allow get: if isVerifiedUser()
         && isValidId(paymentId)
-        && isOwner(existing().ownerId);
+        && isAdminOrAccountant();
 
-      allow list: if isVerifiedUser()
-        && existing().ownerId == request.auth.uid;
+      allow list: if isAdminOrAccountant();
 
       allow create: if isVerifiedUser()
         && isValidId(paymentId)
@@ -1012,8 +1166,8 @@ service cloud.firestore {
             && incoming().ledgerEntryId == paymentId
             && incoming().reference == paymentId
             && incoming().createdAt == request.time
+            && isAdminOrAccountant()
             && exists(/databases/$(database)/documents/clients/$(incoming().clientId))
-            && get(/databases/$(database)/documents/clients/$(incoming().clientId)).data.ownerId == request.auth.uid
             && existsAfter(/databases/$(database)/documents/client_ledger/$(paymentId))
             && getAfter(/databases/$(database)/documents/client_ledger/$(paymentId)).data.ownerId == request.auth.uid
             && getAfter(/databases/$(database)/documents/client_ledger/$(paymentId)).data.clientId == incoming().clientId
@@ -1025,6 +1179,7 @@ service cloud.firestore {
             isValidAdjustmentMoneyIn(incoming())
             && incoming().reference == paymentId
             && incoming().createdAt == request.time
+            && isAdminOrAccountant()
           )
         );
 
@@ -1032,25 +1187,26 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // Collection: /suppliers/{supplierId} (Master Data: Edit & Hard Delete Allowed by Owner)
+    // Collection: /suppliers/{supplierId} (Read: All Mill Staff | Create: Admin/Manager | Edit/Delete: Admin ONLY)
     match /suppliers/{supplierId} {
       allow get: if isVerifiedUser()
         && isValidId(supplierId)
-        && isOwner(existing().ownerId);
+        && isMillStaff();
 
-      allow list: if isVerifiedUser()
-        && existing().ownerId == request.auth.uid;
+      allow list: if isMillStaff();
 
       allow create: if isVerifiedUser()
         && isValidId(supplierId)
         && isValidSupplier(incoming())
+        && incoming().ownerId == request.auth.uid
         && incoming().createdAt == request.time
-        && incoming().updatedAt == request.time;
+        && incoming().updatedAt == request.time
+        && isAdminOrManager();
 
       allow update: if isVerifiedUser()
         && isValidId(supplierId)
         && isValidSupplier(incoming())
-        && isOwner(existing().ownerId)
+        && isAdmin()
         && incoming().ownerId == existing().ownerId
         && incoming().createdAt == existing().createdAt
         && incoming().updatedAt == request.time
@@ -1063,27 +1219,29 @@ service cloud.firestore {
 
       allow delete: if isVerifiedUser()
         && isValidId(supplierId)
-        && isOwner(existing().ownerId);
+        && isAdmin();
     }
 
     // Collection: /supplier_ledger/{entryId} (Append-Only Supplier Payable Log — Immutable)
     match /supplier_ledger/{entryId} {
       allow get: if isVerifiedUser()
         && isValidId(entryId)
-        && isOwner(existing().ownerId);
+        && isMillStaff();
 
-      allow list: if isVerifiedUser()
-        && existing().ownerId == request.auth.uid;
+      allow list: if isMillStaff();
 
       allow create: if isVerifiedUser()
         && isValidId(entryId)
         && isValidSupplierLedgerEntry(incoming())
         && incoming().createdAt == request.time
         && (
-          (
-            existsAfter(/databases/$(database)/documents/suppliers/$(incoming().supplierId))
-            && getAfter(/databases/$(database)/documents/suppliers/$(incoming().supplierId)).data.ownerId == request.auth.uid
-          ) || (
+          isAdmin()
+          || (isManager() && incoming().txn_type in ['opening', 'purchase'])
+          || (isAccountant() && incoming().txn_type in ['payment', 'adjustment'])
+        )
+        && (
+          existsAfter(/databases/$(database)/documents/suppliers/$(incoming().supplierId))
+          || (
             incoming().txn_type == 'adjustment'
             && !existsAfter(/databases/$(database)/documents/suppliers/$(incoming().supplierId))
           )
@@ -1093,24 +1251,24 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // Collection: /purchases/{purchaseId} (Editable/Deletable ONLY while Pending; Paid is Terminal)
+    // Collection: /purchases/{purchaseId} (Admin & Manager ONLY | Edit Details & Delete: Admin ONLY while Pending)
     match /purchases/{purchaseId} {
       allow get: if isVerifiedUser()
         && isValidId(purchaseId)
-        && isOwner(existing().ownerId);
+        && isAdminOrManager();
 
-      allow list: if isVerifiedUser()
-        && existing().ownerId == request.auth.uid;
+      allow list: if isAdminOrManager();
 
       allow create: if isVerifiedUser()
         && isValidId(purchaseId)
         && isValidPurchase(incoming())
+        && incoming().ownerId == request.auth.uid
         && incoming().ledgerEntryId == purchaseId
         && incoming().reference == purchaseId
         && incoming().createdAt == request.time
         && (!('updatedAt' in incoming()) || incoming().updatedAt == request.time)
+        && isAdminOrManager()
         && exists(/databases/$(database)/documents/suppliers/$(incoming().supplierId))
-        && get(/databases/$(database)/documents/suppliers/$(incoming().supplierId)).data.ownerId == request.auth.uid
         && existsAfter(/databases/$(database)/documents/supplier_ledger/$(purchaseId))
         && getAfter(/databases/$(database)/documents/supplier_ledger/$(purchaseId)).data.ownerId == request.auth.uid
         && getAfter(/databases/$(database)/documents/supplier_ledger/$(purchaseId)).data.supplierId == incoming().supplierId
@@ -1122,7 +1280,6 @@ service cloud.firestore {
       allow update: if isVerifiedUser()
         && isValidId(purchaseId)
         && isValidPurchase(incoming())
-        && isOwner(existing().ownerId)
         && (!('status' in existing()) || existing().status == 'Pending')
         && incoming().ownerId == existing().ownerId
         && incoming().supplierId == existing().supplierId
@@ -1131,9 +1288,10 @@ service cloud.firestore {
         && incoming().createdAt == existing().createdAt
         && incoming().updatedAt == request.time
         && (
-          // Action 1: Edit pending purchase details
+          // Action 1: Admin ONLY edits pending purchase details
           (
-            (!('status' in incoming()) || incoming().status == 'Pending')
+            isAdmin()
+            && (!('status' in incoming()) || incoming().status == 'Pending')
             && incoming().diff(existing()).affectedKeys().hasOnly([
               'purchaseDate',
               'itemName',
@@ -1145,8 +1303,9 @@ service cloud.firestore {
               'updatedAt'
             ])
           ) || (
-            // Action 2: Mark pending purchase as Paid (terminal lock)
-            incoming().status == 'Paid'
+            // Action 2: Admin or Manager marks pending purchase as Paid (terminal lock)
+            isAdminOrManager()
+            && incoming().status == 'Paid'
             && incoming().purchaseDate == existing().purchaseDate
             && incoming().itemName == existing().itemName
             && incoming().quantity == existing().quantity
@@ -1162,18 +1321,17 @@ service cloud.firestore {
 
       allow delete: if isVerifiedUser()
         && isValidId(purchaseId)
-        && isOwner(existing().ownerId)
-        && (!('status' in existing()) || existing().status == 'Pending');
+        && (!('status' in existing()) || existing().status == 'Pending')
+        && isAdmin();
     }
 
-    // Collection: /money_out/{paymentId} (Append-Only Cash/Bank Outflow OR Cash Reversal — Immutable)
+    // Collection: /money_out/{paymentId} (Strictly Admin & Accountant ONLY — Append-Only Immutable)
     match /money_out/{paymentId} {
       allow get: if isVerifiedUser()
         && isValidId(paymentId)
-        && isOwner(existing().ownerId);
+        && isAdminOrAccountant();
 
-      allow list: if isVerifiedUser()
-        && existing().ownerId == request.auth.uid;
+      allow list: if isAdminOrAccountant();
 
       allow create: if isVerifiedUser()
         && isValidId(paymentId)
@@ -1183,8 +1341,8 @@ service cloud.firestore {
             && incoming().ledgerEntryId == paymentId
             && incoming().reference == paymentId
             && incoming().createdAt == request.time
+            && isAdminOrAccountant()
             && exists(/databases/$(database)/documents/suppliers/$(incoming().supplierId))
-            && get(/databases/$(database)/documents/suppliers/$(incoming().supplierId)).data.ownerId == request.auth.uid
             && existsAfter(/databases/$(database)/documents/supplier_ledger/$(paymentId))
             && getAfter(/databases/$(database)/documents/supplier_ledger/$(paymentId)).data.ownerId == request.auth.uid
             && getAfter(/databases/$(database)/documents/supplier_ledger/$(paymentId)).data.supplierId == incoming().supplierId
@@ -1197,6 +1355,7 @@ service cloud.firestore {
             && incoming().expenseId == paymentId
             && incoming().reference == paymentId
             && incoming().createdAt == request.time
+            && isAdminOrAccountant()
             && existsAfter(/databases/$(database)/documents/expenses/$(paymentId))
             && getAfter(/databases/$(database)/documents/expenses/$(paymentId)).data.ownerId == request.auth.uid
             && getAfter(/databases/$(database)/documents/expenses/$(paymentId)).data.moneyOutId == paymentId
@@ -1211,8 +1370,8 @@ service cloud.firestore {
             && incoming().advanceId == paymentId
             && incoming().reference == paymentId
             && incoming().createdAt == request.time
+            && isAdmin()
             && exists(/databases/$(database)/documents/employees/$(incoming().employeeId))
-            && get(/databases/$(database)/documents/employees/$(incoming().employeeId)).data.ownerId == request.auth.uid
             && existsAfter(/databases/$(database)/documents/employee_advances/$(paymentId))
             && getAfter(/databases/$(database)/documents/employee_advances/$(paymentId)).data.ownerId == request.auth.uid
             && getAfter(/databases/$(database)/documents/employee_advances/$(paymentId)).data.employeeId == incoming().employeeId
@@ -1225,6 +1384,7 @@ service cloud.firestore {
             isValidAdjustmentMoneyOut(incoming())
             && incoming().reference == paymentId
             && incoming().createdAt == request.time
+            && isAdminOrAccountant()
           )
         );
 
@@ -1232,14 +1392,13 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // Collection: /expenses/{expenseId} (Append-Only Factory Operating Expenses Paired Atomically with money_out)
+    // Collection: /expenses/{expenseId} (Strictly Admin & Accountant ONLY — Append-Only Immutable)
     match /expenses/{expenseId} {
       allow get: if isVerifiedUser()
         && isValidId(expenseId)
-        && isOwner(existing().ownerId);
+        && isAdminOrAccountant();
 
-      allow list: if isVerifiedUser()
-        && existing().ownerId == request.auth.uid;
+      allow list: if isAdminOrAccountant();
 
       allow create: if isVerifiedUser()
         && isValidId(expenseId)
@@ -1247,6 +1406,7 @@ service cloud.firestore {
         && incoming().moneyOutId == expenseId
         && incoming().reference == expenseId
         && incoming().createdAt == request.time
+        && isAdminOrAccountant()
         && existsAfter(/databases/$(database)/documents/money_out/$(expenseId))
         && getAfter(/databases/$(database)/documents/money_out/$(expenseId)).data.ownerId == request.auth.uid
         && getAfter(/databases/$(database)/documents/money_out/$(expenseId)).data.expenseId == expenseId
@@ -1261,37 +1421,39 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // Collection: /inventory/{itemId} (Master Data: Edit & Hard Delete Allowed by Owner)
+    // Collection: /inventory/{itemId} (Admin & Manager | Master Edit & Delete: Admin ONLY)
     match /inventory/{itemId} {
       allow get: if isVerifiedUser()
         && isValidId(itemId)
-        && isOwner(existing().ownerId);
+        && isAdminOrManager();
 
-      allow list: if isVerifiedUser()
-        && existing().ownerId == request.auth.uid;
+      allow list: if isAdminOrManager();
 
       allow create: if isVerifiedUser()
         && isValidId(itemId)
         && isValidInventoryItem(incoming())
+        && incoming().ownerId == request.auth.uid
         && incoming().createdAt == request.time
-        && incoming().updatedAt == request.time;
+        && incoming().updatedAt == request.time
+        && isAdminOrManager();
 
       allow update: if isVerifiedUser()
         && isValidId(itemId)
         && isValidInventoryItem(incoming())
-        && isOwner(existing().ownerId)
         && incoming().ownerId == existing().ownerId
         && incoming().createdAt == existing().createdAt
         && incoming().updatedAt == request.time
         && (
-          // Action 1: Stock In / Stock Out / Purchase auto-restock
+          // Action 1: Admin or Manager performs Stock In / Stock Out / Purchase auto-restock
           (
-            incoming().itemName == existing().itemName
+            isAdminOrManager()
+            && incoming().itemName == existing().itemName
             && incoming().unit == existing().unit
             && incoming().diff(existing()).affectedKeys().hasOnly(['currentStock', 'updatedAt'])
           ) || (
-            // Action 2: Master Data Edit (name, unit, minimum stock alert level)
-            incoming().currentStock == existing().currentStock
+            // Action 2: Admin ONLY edits Master Data (name, unit, minimum stock alert level)
+            isAdmin()
+            && incoming().currentStock == existing().currentStock
             && incoming().diff(existing()).affectedKeys().hasOnly([
               'itemName',
               'unit',
@@ -1303,24 +1465,23 @@ service cloud.firestore {
 
       allow delete: if isVerifiedUser()
         && isValidId(itemId)
-        && isOwner(existing().ownerId);
+        && isAdmin();
     }
 
-    // Collection: /stock_movements/{movementId} (Append-Only Inventory Stock Movement Audit Log)
+    // Collection: /stock_movements/{movementId} (Admin & Manager ONLY — Append-Only Immutable)
     match /stock_movements/{movementId} {
       allow get: if isVerifiedUser()
         && isValidId(movementId)
-        && isOwner(existing().ownerId);
+        && isAdminOrManager();
 
-      allow list: if isVerifiedUser()
-        && existing().ownerId == request.auth.uid;
+      allow list: if isAdminOrManager();
 
       allow create: if isVerifiedUser()
         && isValidId(movementId)
         && isValidStockMovement(incoming())
         && incoming().createdAt == request.time
+        && isAdminOrManager()
         && existsAfter(/databases/$(database)/documents/inventory/$(incoming().inventoryItemId))
-        && getAfter(/databases/$(database)/documents/inventory/$(incoming().inventoryItemId)).data.ownerId == request.auth.uid
         && getAfter(/databases/$(database)/documents/inventory/$(incoming().inventoryItemId)).data.unit == incoming().unit
         && math.abs(getAfter(/databases/$(database)/documents/inventory/$(incoming().inventoryItemId)).data.currentStock - incoming().resultingStock) <= 0.02;
 
@@ -1328,25 +1489,26 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // Collection: /employees/{employeeId} (Master Data: Edit & Hard Delete Allowed by Owner)
+    // Collection: /employees/{employeeId} (Strictly Admin ONLY)
     match /employees/{employeeId} {
       allow get: if isVerifiedUser()
         && isValidId(employeeId)
-        && isOwner(existing().ownerId);
+        && isAdmin();
 
-      allow list: if isVerifiedUser()
-        && existing().ownerId == request.auth.uid;
+      allow list: if isAdmin();
 
       allow create: if isVerifiedUser()
         && isValidId(employeeId)
         && isValidEmployee(incoming())
+        && incoming().ownerId == request.auth.uid
         && incoming().createdAt == request.time
-        && incoming().updatedAt == request.time;
+        && incoming().updatedAt == request.time
+        && isAdmin();
 
       allow update: if isVerifiedUser()
         && isValidId(employeeId)
         && isValidEmployee(incoming())
-        && isOwner(existing().ownerId)
+        && isAdmin()
         && incoming().ownerId == existing().ownerId
         && incoming().createdAt == existing().createdAt
         && incoming().updatedAt == request.time
@@ -1361,17 +1523,16 @@ service cloud.firestore {
 
       allow delete: if isVerifiedUser()
         && isValidId(employeeId)
-        && isOwner(existing().ownerId);
+        && isAdmin();
     }
 
-    // Collection: /employee_advances/{advanceId} (Append-Only Weekly Advances Paired Atomically with money_out)
+    // Collection: /employee_advances/{advanceId} (Strictly Admin ONLY — Append-Only Immutable)
     match /employee_advances/{advanceId} {
       allow get: if isVerifiedUser()
         && isValidId(advanceId)
-        && isOwner(existing().ownerId);
+        && isAdmin();
 
-      allow list: if isVerifiedUser()
-        && existing().ownerId == request.auth.uid;
+      allow list: if isAdmin();
 
       allow create: if isVerifiedUser()
         && isValidId(advanceId)
@@ -1379,8 +1540,8 @@ service cloud.firestore {
         && incoming().moneyOutId == advanceId
         && incoming().reference == advanceId
         && incoming().createdAt == request.time
+        && isAdmin()
         && exists(/databases/$(database)/documents/employees/$(incoming().employeeId))
-        && get(/databases/$(database)/documents/employees/$(incoming().employeeId)).data.ownerId == request.auth.uid
         && existsAfter(/databases/$(database)/documents/money_out/$(advanceId))
         && getAfter(/databases/$(database)/documents/money_out/$(advanceId)).data.ownerId == request.auth.uid
         && getAfter(/databases/$(database)/documents/money_out/$(advanceId)).data.employeeId == incoming().employeeId

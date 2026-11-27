@@ -26,6 +26,9 @@ interface SupplierLedgerDrawerProps {
   purchases: PurchaseRecord[];
   moneyOutRecords: MoneyOutRecord[];
   initialTab?: SupplierDrawerTab;
+  isAdmin: boolean;
+  canManagePayments: boolean;
+  canAdjustLedgers: boolean;
   onClose: () => void;
   onEditSupplier: (supplier: SupplierRecord) => void;
   onDeleteSupplier: (supplier: SupplierRecord) => void;
@@ -43,6 +46,9 @@ export function SupplierLedgerDrawer({
   purchases,
   moneyOutRecords,
   initialTab = 'ledger',
+  isAdmin,
+  canManagePayments,
+  canAdjustLedgers,
   onClose,
   onEditSupplier,
   onDeleteSupplier,
@@ -165,30 +171,36 @@ export function SupplierLedgerDrawer({
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <button
-              type="button"
-              onClick={() => onPaySupplier(supplier)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-[#1e3a8a] hover:bg-[#1e40af] rounded-md transition-colors cursor-pointer whitespace-nowrap"
-            >
-              <Banknote className="w-3.5 h-3.5 shrink-0" />
-              Pay Supplier
-            </button>
-            <button
-              type="button"
-              onClick={() => onEditSupplier(supplier)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-md transition-colors cursor-pointer whitespace-nowrap"
-            >
-              <Edit2 className="w-3.5 h-3.5" />
-              Edit
-            </button>
-            <button
-              type="button"
-              onClick={() => onDeleteSupplier(supplier)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-700 bg-red-50 border border-red-200 hover:bg-red-100 rounded-md transition-colors cursor-pointer whitespace-nowrap"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              Delete
-            </button>
+            {canManagePayments && (
+              <button
+                type="button"
+                onClick={() => onPaySupplier(supplier)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-[#1e3a8a] hover:bg-[#1e40af] rounded-md transition-colors cursor-pointer whitespace-nowrap"
+              >
+                <Banknote className="w-3.5 h-3.5 shrink-0" />
+                Pay Supplier
+              </button>
+            )}
+            {isAdmin && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => onEditSupplier(supplier)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-md transition-colors cursor-pointer whitespace-nowrap"
+                >
+                  <Edit2 className="w-3.5 h-3.5" />
+                  Edit
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onDeleteSupplier(supplier)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-700 bg-red-50 border border-red-200 hover:bg-red-100 rounded-md transition-colors cursor-pointer whitespace-nowrap"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Delete
+                </button>
+              </>
+            )}
             <button
               type="button"
               onClick={onClose}
@@ -389,14 +401,18 @@ export function SupplierLedgerDrawer({
                               </span>
                             </td>
                             <td className="py-3 px-4 align-top text-right whitespace-nowrap">
-                              <button
-                                type="button"
-                                onClick={() => onCorrectSupplierLedgerEntry(entry)}
-                                className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded transition-colors cursor-pointer whitespace-nowrap"
-                              >
-                                <RotateCcw className="w-3.5 h-3.5 shrink-0" />
-                                Correct / Adjust
-                              </button>
+                              {canAdjustLedgers ? (
+                                <button
+                                  type="button"
+                                  onClick={() => onCorrectSupplierLedgerEntry(entry)}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded transition-colors cursor-pointer whitespace-nowrap"
+                                >
+                                  <RotateCcw className="w-3.5 h-3.5 shrink-0" />
+                                  Correct / Adjust
+                                </button>
+                              ) : (
+                                <span className="text-xs text-slate-400">—</span>
+                              )}
                             </td>
                           </tr>
                         ))}
@@ -428,7 +444,9 @@ export function SupplierLedgerDrawer({
                           <th className="py-2.5 px-4 text-right">Rate</th>
                           <th className="py-2.5 px-4 text-right">Total</th>
                           <th className="py-2.5 px-4">Status</th>
-                          <th className="py-2.5 px-4 text-right">Actions</th>
+                          {isAdmin && (
+                            <th className="py-2.5 px-4 text-right">Actions</th>
+                          )}
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-200 text-sm">
@@ -470,40 +488,42 @@ export function SupplierLedgerDrawer({
                                   {isPending ? 'Pending' : 'Paid'}
                                 </span>
                               </td>
-                              <td className="py-3 px-4 text-right whitespace-nowrap">
-                                <div className="inline-flex items-center gap-1">
-                                  <button
-                                    type="button"
-                                    disabled={!isPending}
-                                    onClick={() => onEditPurchase(p)}
-                                    title={
-                                      isPending
-                                        ? 'Edit Purchase'
-                                        : 'Paid purchases are locked and cannot be edited'
-                                    }
-                                    className="p-1.5 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-                                  >
-                                    {isPending ? (
-                                      <Edit2 className="w-3.5 h-3.5" />
-                                    ) : (
-                                      <Lock className="w-3.5 h-3.5" />
-                                    )}
-                                  </button>
-                                  <button
-                                    type="button"
-                                    disabled={!isPending}
-                                    onClick={() => onDeletePurchase(p)}
-                                    title={
-                                      isPending
-                                        ? 'Delete Purchase'
-                                        : 'Paid purchases are locked and cannot be deleted'
-                                    }
-                                    className="p-1.5 text-slate-500 hover:text-red-700 hover:bg-red-50 rounded transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                  </button>
-                                </div>
-                              </td>
+                              {isAdmin && (
+                                <td className="py-3 px-4 text-right whitespace-nowrap">
+                                  <div className="inline-flex items-center gap-1">
+                                    <button
+                                      type="button"
+                                      disabled={!isPending}
+                                      onClick={() => onEditPurchase(p)}
+                                      title={
+                                        isPending
+                                          ? 'Edit Purchase'
+                                          : 'Paid purchases are locked and cannot be edited'
+                                      }
+                                      className="p-1.5 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                                    >
+                                      {isPending ? (
+                                        <Edit2 className="w-3.5 h-3.5" />
+                                      ) : (
+                                        <Lock className="w-3.5 h-3.5" />
+                                      )}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={!isPending}
+                                      onClick={() => onDeletePurchase(p)}
+                                      title={
+                                        isPending
+                                          ? 'Delete Purchase'
+                                          : 'Paid purchases are locked and cannot be deleted'
+                                      }
+                                      className="p-1.5 text-slate-500 hover:text-red-700 hover:bg-red-50 rounded transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                </td>
+                              )}
                             </tr>
                           );
                         })}
@@ -522,14 +542,16 @@ export function SupplierLedgerDrawer({
                   <p className="text-sm font-medium text-slate-900">
                     No payments sent to {supplier.supplierName} yet
                   </p>
-                  <button
-                    type="button"
-                    onClick={() => onPaySupplier(supplier)}
-                    className="mt-4 inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium text-white bg-[#1e3a8a] hover:bg-[#1e40af] rounded-md transition-colors cursor-pointer whitespace-nowrap"
-                  >
-                    <Banknote className="w-3.5 h-3.5" />
-                    Pay Supplier
-                  </button>
+                  {canManagePayments && (
+                    <button
+                      type="button"
+                      onClick={() => onPaySupplier(supplier)}
+                      className="mt-4 inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium text-white bg-[#1e3a8a] hover:bg-[#1e40af] rounded-md transition-colors cursor-pointer whitespace-nowrap"
+                    >
+                      <Banknote className="w-3.5 h-3.5" />
+                      Pay Supplier
+                    </button>
+                  )}
                 </div>
               ) : (
                 <div className="border border-slate-200 rounded-md overflow-hidden">
@@ -569,20 +591,24 @@ export function SupplierLedgerDrawer({
                               {formatCurrency(pay.amount)}
                             </td>
                             <td className="py-3 px-4 text-right whitespace-nowrap">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  if (pay.moneyOut) {
-                                    onCorrectMoneyOut(pay.moneyOut);
-                                  } else {
-                                    onCorrectSupplierLedgerEntry(pay.entry);
-                                  }
-                                }}
-                                className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded transition-colors cursor-pointer whitespace-nowrap"
-                              >
-                                <RotateCcw className="w-3.5 h-3.5 shrink-0" />
-                                Correct / Adjust
-                              </button>
+                              {canAdjustLedgers ? (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (pay.moneyOut) {
+                                      onCorrectMoneyOut(pay.moneyOut);
+                                    } else {
+                                      onCorrectSupplierLedgerEntry(pay.entry);
+                                    }
+                                  }}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded transition-colors cursor-pointer whitespace-nowrap"
+                                >
+                                  <RotateCcw className="w-3.5 h-3.5 shrink-0" />
+                                  Correct / Adjust
+                                </button>
+                              ) : (
+                                <span className="text-xs text-slate-400">—</span>
+                              )}
                             </td>
                           </tr>
                         ))}

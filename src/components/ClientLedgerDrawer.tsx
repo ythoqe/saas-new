@@ -28,6 +28,9 @@ interface ClientLedgerDrawerProps {
   entries: ClientLedgerEntry[];
   moneyInRecords: MoneyInRecord[];
   initialTab?: ClientDrawerTab;
+  isAdmin: boolean;
+  canManagePayments: boolean;
+  canAdjustLedgers: boolean;
   onClose: () => void;
   onEditClient: (client: ClientRecord) => void;
   onDeleteClient: (client: ClientRecord) => void;
@@ -45,6 +48,9 @@ export function ClientLedgerDrawer({
   entries,
   moneyInRecords,
   initialTab = 'ledger',
+  isAdmin,
+  canManagePayments,
+  canAdjustLedgers,
   onClose,
   onEditClient,
   onDeleteClient,
@@ -239,30 +245,36 @@ export function ClientLedgerDrawer({
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <button
-              type="button"
-              onClick={() => onReceivePayment(client)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-emerald-700 hover:bg-emerald-800 rounded-md transition-colors cursor-pointer whitespace-nowrap"
-            >
-              <Banknote className="w-3.5 h-3.5 shrink-0" />
-              Receive Payment
-            </button>
-            <button
-              type="button"
-              onClick={() => onEditClient(client)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-md transition-colors cursor-pointer whitespace-nowrap"
-            >
-              <Edit2 className="w-3.5 h-3.5" />
-              Edit
-            </button>
-            <button
-              type="button"
-              onClick={() => onDeleteClient(client)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-700 bg-red-50 border border-red-200 hover:bg-red-100 rounded-md transition-colors cursor-pointer whitespace-nowrap"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              Delete
-            </button>
+            {canManagePayments && (
+              <button
+                type="button"
+                onClick={() => onReceivePayment(client)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-emerald-700 hover:bg-emerald-800 rounded-md transition-colors cursor-pointer whitespace-nowrap"
+              >
+                <Banknote className="w-3.5 h-3.5 shrink-0" />
+                Receive Payment
+              </button>
+            )}
+            {isAdmin && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => onEditClient(client)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-md transition-colors cursor-pointer whitespace-nowrap"
+                >
+                  <Edit2 className="w-3.5 h-3.5" />
+                  Edit
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onDeleteClient(client)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-700 bg-red-50 border border-red-200 hover:bg-red-100 rounded-md transition-colors cursor-pointer whitespace-nowrap"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Delete
+                </button>
+              </>
+            )}
             <button
               type="button"
               onClick={onClose}
@@ -364,17 +376,19 @@ export function ClientLedgerDrawer({
           </div>
 
           {activeTab === 'ledger' ? (
-            <button
-              type="button"
-              onClick={() => {
-                setShowEntryForm((prev) => !prev);
-                setFormError(null);
-              }}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-md transition-colors cursor-pointer whitespace-nowrap"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              {showEntryForm ? 'Close Entry Form' : 'Manual Ledger Entry'}
-            </button>
+            canAdjustLedgers ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setShowEntryForm((prev) => !prev);
+                  setFormError(null);
+                }}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-md transition-colors cursor-pointer whitespace-nowrap"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                {showEntryForm ? 'Close Entry Form' : 'Manual Ledger Entry'}
+              </button>
+            ) : null
           ) : (
             <p className="text-xs text-slate-500 font-mono tabular-nums">
               Total Paid:{' '}
@@ -390,7 +404,7 @@ export function ClientLedgerDrawer({
           {activeTab === 'ledger' ? (
             <>
               {/* Inline Manual Ledger Entry Form */}
-              {showEntryForm && (
+              {showEntryForm && canAdjustLedgers && (
                 <form
                   onSubmit={handleRecordEntry}
                   className="p-5 bg-slate-50 border border-slate-200 rounded-md space-y-4"
@@ -637,14 +651,18 @@ export function ClientLedgerDrawer({
                                     Print Invoice
                                   </button>
                                 ) : null}
-                                <button
-                                  type="button"
-                                  onClick={() => onCorrectLedgerEntry(entry)}
-                                  className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded transition-colors cursor-pointer whitespace-nowrap"
-                                >
-                                  <RotateCcw className="w-3.5 h-3.5 shrink-0" />
-                                  Correct / Adjust
-                                </button>
+                                {canAdjustLedgers ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => onCorrectLedgerEntry(entry)}
+                                    className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded transition-colors cursor-pointer whitespace-nowrap"
+                                  >
+                                    <RotateCcw className="w-3.5 h-3.5 shrink-0" />
+                                    Correct / Adjust
+                                  </button>
+                                ) : entry.txn_type !== 'invoice' ? (
+                                  <span className="text-xs text-slate-400">—</span>
+                                ) : null}
                               </div>
                             </td>
                           </tr>
@@ -667,14 +685,16 @@ export function ClientLedgerDrawer({
                     Record Cash, Bank, or Mobile Banking receipts to reduce this
                     client&apos;s Current Due automatically.
                   </p>
-                  <button
-                    type="button"
-                    onClick={() => onReceivePayment(client)}
-                    className="mt-4 inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium text-white bg-emerald-700 hover:bg-emerald-800 rounded-md transition-colors cursor-pointer whitespace-nowrap"
-                  >
-                    <Banknote className="w-3.5 h-3.5" />
-                    Receive First Payment
-                  </button>
+                  {canManagePayments && (
+                    <button
+                      type="button"
+                      onClick={() => onReceivePayment(client)}
+                      className="mt-4 inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium text-white bg-emerald-700 hover:bg-emerald-800 rounded-md transition-colors cursor-pointer whitespace-nowrap"
+                    >
+                      <Banknote className="w-3.5 h-3.5" />
+                      Receive First Payment
+                    </button>
+                  )}
                 </div>
               ) : (
                 <div className="border border-slate-200 rounded-md overflow-hidden">
@@ -714,20 +734,24 @@ export function ClientLedgerDrawer({
                               {formatCurrency(payment.amount)}
                             </td>
                             <td className="py-3 px-4 text-right whitespace-nowrap">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  if (payment.moneyIn) {
-                                    onCorrectMoneyIn(payment.moneyIn);
-                                  } else {
-                                    onCorrectLedgerEntry(payment.entry);
-                                  }
-                                }}
-                                className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded transition-colors cursor-pointer whitespace-nowrap"
-                              >
-                                <RotateCcw className="w-3.5 h-3.5 shrink-0" />
-                                Correct / Adjust
-                              </button>
+                              {canAdjustLedgers ? (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (payment.moneyIn) {
+                                      onCorrectMoneyIn(payment.moneyIn);
+                                    } else {
+                                      onCorrectLedgerEntry(payment.entry);
+                                    }
+                                  }}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded transition-colors cursor-pointer whitespace-nowrap"
+                                >
+                                  <RotateCcw className="w-3.5 h-3.5 shrink-0" />
+                                  Correct / Adjust
+                                </button>
+                              ) : (
+                                <span className="text-xs text-slate-400">—</span>
+                              )}
                             </td>
                           </tr>
                         ))}

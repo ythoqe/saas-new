@@ -4,12 +4,19 @@ import {
   collection,
   deleteDoc,
   doc,
+  getDoc,
   onSnapshot,
-  query,
-  where,
+  serverTimestamp,
+  setDoc,
+  writeBatch,
 } from 'firebase/firestore';
-import { CheckCircle2, Menu, Plus, X } from 'lucide-react';
+import { CheckCircle2, Globe, Menu, Plus, X } from 'lucide-react';
 import { auth, db, handleFirestoreError, OperationType } from './firebase';
+import {
+  LanguageProvider,
+  useLanguage,
+  type Language,
+} from './contexts/LanguageContext';
 import { AddClientDrawer } from './components/AddClientDrawer';
 import { AddSupplierDrawer } from './components/AddSupplierDrawer';
 import { AuthScreen } from './components/AuthScreen';
@@ -58,6 +65,7 @@ import {
   type SupplierDrawerTab,
 } from './components/SupplierLedgerDrawer';
 import { SupplierManagementView } from './components/SupplierManagementView';
+import { UserManagementView } from './components/UserManagementView';
 import type {
   AdvancePaymentMethod,
   ClientLedgerEntry,
@@ -79,6 +87,8 @@ import type {
   SupplierLedgerEntry,
   SupplierRecord,
   SupplierWithLedgerSummary,
+  UserProfile,
+  UserRole,
 } from './types/mill';
 import {
   buildClientSummaries,
@@ -89,6 +99,19 @@ import {
   roundCurrency,
   timestampToDate,
 } from './utils/ledger';
+import {
+  BOOTSTRAPPED_ADMIN_EMAIL,
+  canAccessSection,
+  canAdjustLedgers,
+  canCreateClientsOrSuppliers,
+  canManagePayments,
+  canViewCashflow,
+  canViewEmployees,
+  canViewInventory,
+  canViewOrders,
+  getDefaultSectionForRole,
+  isAdminRole,
+} from './utils/rbac';
 
 interface ToastState {
   message: string;
@@ -97,8 +120,12 @@ interface ToastState {
 }
 
 function MillDashboardShell() {
+  const { lang, setLang, t } = useLanguage();
   const [user, setUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [userProfileLoaded, setUserProfileLoaded] = useState(false);
+  const [registeredUsers, setRegisteredUsers] = useState<UserProfile[]>([]);
 
   // Receivables & Orders state
   const [clients, setClients] = useState<ClientRecord[]>([]);
@@ -136,6 +163,7 @@ function MillDashboardShell() {
   const [stockMovementsLoaded, setStockMovementsLoaded] = useState(false);
   const [employeesLoaded, setEmployeesLoaded] = useState(false);
   const [employeeAdvancesLoaded, setEmployeeAdvancesLoaded] = useState(false);
+  const [usersLoaded, setUsersLoaded] = useState(false);
   const [fatalError, setFatalError] = useState<Error | null>(null);
 
   const [activeSection, setActiveSection] = useState<NavSection>('overview');
@@ -200,6 +228,10 @@ function MillDashboardShell() {
       setUser(firebaseUser);
       setAuthReady(true);
       if (!firebaseUser) {
+        setUserProfile(null);
+        setUserProfileLoaded(false);
+        setRegisteredUsers([]);
+        setUsersLoaded(false);
         setClients([]);
         setLedgerEntries([]);
         setOrders([]);
@@ -244,23 +276,162 @@ function MillDashboardShell() {
     return () => unsubscribe();
   }, []);
 
-  // Firestore real-time listeners (strictly scoped by ownerId after authReady)
+  // User Profile Bootstrap (First User Rule) & Real-Time Role Sync
   useEffect(() => {
     if (!authReady || !user) return;
 
-    setClientsLoaded(false);
-    setLedgerLoaded(false);
-    setOrdersLoaded(false);
-    setMoneyInLoaded(false);
-    setSuppliersLoaded(false);
-    setSupplierLedgerLoaded(false);
-    setPurchasesLoaded(false);
-    setMoneyOutLoaded(false);
-    setExpensesLoaded(false);
-    setInventoryLoaded(false);
-    setStockMovementsLoaded(false);
-    setEmployeesLoaded(false);
-    setEmployeeAdvancesLoaded(false);
+    let cancelled = false;
+    let unsubUserDoc: (() => void) | null = null;
+    setUserProfileLoaded(false);
+
+    const bootstrapAndListen = async () => {
+      const userDocRef = doc(db, 'users', user.uid);
+      try {
+        const existingSnap = await getDoc(userDocRef);
+        if (!existingSnap.exists()) {
+          const cleanEmail = (user.email ?? '').trim();
+          const cleanDisplayName = (user.displayName ?? '').trim().slice(0, 120);
+          const isBootstrapped =
+            cleanEmail.toLowerCase() === BOOTSTRAPPED_ADMIN_EMAIL.toLowerCase();
+          const bootstrapRef = doc(db, 'app_meta', 'bootstrap');
+          const bootstrapSnap = await getDoc(bootstrapRef);
+
+          if (isBootstrapped || !bootstrapSnap.exists()) {
+            const batch = writeBatch(db);
+            batch.set(userDocRef, {
+              uid: user.uid,
+              email: cleanEmail,
+              displayName: cleanDisplayName,
+              role: 'admin',
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp(),
+            });
+            if (!bootstrapSnap.exists()) {
+              batch.set(bootstrapRef, {
+                firstAdminUid: user.uid,
+                initializedAt: serverTimestamp(),
+              });
+            }
+            try {
+              await batch.commit();
+            } catch (batchErr) {
+              if (isBootstrapped) {
+                throw batchErr;
+              }
+              // Concurrent first-user race fallback: assign default manager role
+              await setDoc(userDocRef, {
+                uid: user.uid,
+                email: cleanEmail,
+                displayName: cleanDisplayName,
+                role: 'manager',
+                createdAt: serverTimestamp(),
+                updatedAt: serverTimestamp(),
+              });
+            }
+          } else {
+            await setDoc(userDocRef, {
+              uid: user.uid,
+              email: cleanEmail,
+              displayName: cleanDisplayName,
+              role: 'manager',
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp(),
+            });
+          }
+        }
+      } catch (error) {
+        if (!cancelled) {
+          try {
+            handleFirestoreError(error, OperationType.WRITE, `users/${user.uid}`);
+          } catch (wrappedError) {
+            setFatalError(
+              wrappedError instanceof Error
+                ? wrappedError
+                : new Error(String(wrappedError))
+            );
+          }
+        }
+        return;
+      }
+
+      if (cancelled) return;
+
+      unsubUserDoc = onSnapshot(
+        userDocRef,
+        (docSnap) => {
+          if (docSnap.exists()) {
+            const data = docSnap.data();
+            const rawRole = String(data.role ?? 'manager');
+            const parsedRole: UserRole =
+              rawRole === 'admin' ||
+              rawRole === 'manager' ||
+              rawRole === 'accountant'
+                ? rawRole
+                : 'manager';
+            setUserProfile({
+              uid: String(data.uid ?? docSnap.id),
+              email: String(data.email ?? user.email ?? ''),
+              displayName: String(data.displayName ?? user.displayName ?? ''),
+              role: parsedRole,
+              createdAt: data.createdAt ?? null,
+              updatedAt: data.updatedAt ?? null,
+            });
+          } else {
+            setUserProfile(null);
+          }
+          setUserProfileLoaded(true);
+        },
+        (error) => {
+          try {
+            handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
+          } catch (wrappedError) {
+            setFatalError(
+              wrappedError instanceof Error
+                ? wrappedError
+                : new Error(String(wrappedError))
+            );
+          }
+        }
+      );
+    };
+
+    void bootstrapAndListen();
+
+    return () => {
+      cancelled = true;
+      if (unsubUserDoc) {
+        unsubUserDoc();
+      }
+    };
+  }, [authReady, user]);
+
+  // Derived RBAC Permissions
+  const userRole: UserRole =
+    userProfile?.role ??
+    ((user?.email ?? '').toLowerCase() === BOOTSTRAPPED_ADMIN_EMAIL.toLowerCase()
+      ? 'admin'
+      : 'manager');
+  const isAdmin = isAdminRole(userRole);
+  const canCreatePartners = canCreateClientsOrSuppliers(userRole);
+  const canPay = canManagePayments(userRole);
+  const canAdjust = canAdjustLedgers(userRole);
+  const allowOrders = canViewOrders(userRole);
+  const allowInventory = canViewInventory(userRole);
+  const allowCashflow = canViewCashflow(userRole);
+  const allowEmployees = canViewEmployees(userRole);
+
+  // Auto-redirect whenever role changes or activeSection is not permitted
+  useEffect(() => {
+    if (userProfileLoaded && !canAccessSection(userRole, activeSection)) {
+      setActiveSection(getDefaultSectionForRole(userRole));
+    }
+  }, [userProfileLoaded, userRole, activeSection]);
+
+  // Role-Scoped Firestore Real-Time Listeners (Shared Mill Workspace)
+  useEffect(() => {
+    if (!authReady || !user || !userProfileLoaded) return;
+
+    const unsubscribers: Array<() => void> = [];
 
     const handleListenerError = (error: unknown, path: string) => {
       try {
@@ -274,391 +445,490 @@ function MillDashboardShell() {
       }
     };
 
-    const unsubClients = onSnapshot(
-      query(collection(db, 'clients'), where('ownerId', '==', user.uid)),
-      (snapshot) => {
-        setClients(
-          snapshot.docs.map((docSnap) => {
-            const data = docSnap.data();
-            return {
-              id: docSnap.id,
-              ownerId: String(data.ownerId ?? ''),
-              clientName: String(data.clientName ?? ''),
-              companyName: String(data.companyName ?? ''),
-              mobile: String(data.mobile ?? ''),
-              address: String(data.address ?? ''),
-              createdAt: data.createdAt ?? null,
-              updatedAt: data.updatedAt ?? null,
-            };
-          })
-        );
-        setClientsLoaded(true);
-      },
-      (error) => handleListenerError(error, 'clients')
+    // 1. Always accessible to all mill staff (Admin, Manager, Accountant)
+    setClientsLoaded(false);
+    setLedgerLoaded(false);
+    setSuppliersLoaded(false);
+    setSupplierLedgerLoaded(false);
+
+    unsubscribers.push(
+      onSnapshot(
+        collection(db, 'clients'),
+        (snapshot) => {
+          setClients(
+            snapshot.docs.map((docSnap) => {
+              const data = docSnap.data();
+              return {
+                id: docSnap.id,
+                ownerId: String(data.ownerId ?? ''),
+                clientName: String(data.clientName ?? ''),
+                companyName: String(data.companyName ?? ''),
+                mobile: String(data.mobile ?? ''),
+                address: String(data.address ?? ''),
+                createdAt: data.createdAt ?? null,
+                updatedAt: data.updatedAt ?? null,
+              };
+            })
+          );
+          setClientsLoaded(true);
+        },
+        (error) => handleListenerError(error, 'clients')
+      )
     );
 
-    const unsubLedger = onSnapshot(
-      query(collection(db, 'client_ledger'), where('ownerId', '==', user.uid)),
-      (snapshot) => {
-        setLedgerEntries(
-          snapshot.docs.map((docSnap) => {
-            const data = docSnap.data();
-            return {
-              id: docSnap.id,
-              ownerId: String(data.ownerId ?? ''),
-              clientId: String(data.clientId ?? ''),
-              txn_type: data.txn_type,
-              debit: Number(data.debit ?? 0),
-              credit: Number(data.credit ?? 0),
-              note: String(data.note ?? ''),
-              reference: String(data.reference ?? ''),
-              createdAt: data.createdAt ?? null,
-            };
-          })
-        );
-        setLedgerLoaded(true);
-      },
-      (error) => handleListenerError(error, 'client_ledger')
+    unsubscribers.push(
+      onSnapshot(
+        collection(db, 'client_ledger'),
+        (snapshot) => {
+          setLedgerEntries(
+            snapshot.docs.map((docSnap) => {
+              const data = docSnap.data();
+              return {
+                id: docSnap.id,
+                ownerId: String(data.ownerId ?? ''),
+                clientId: String(data.clientId ?? ''),
+                txn_type: data.txn_type,
+                debit: Number(data.debit ?? 0),
+                credit: Number(data.credit ?? 0),
+                note: String(data.note ?? ''),
+                reference: String(data.reference ?? ''),
+                createdAt: data.createdAt ?? null,
+              };
+            })
+          );
+          setLedgerLoaded(true);
+        },
+        (error) => handleListenerError(error, 'client_ledger')
+      )
     );
 
-    const unsubOrders = onSnapshot(
-      query(collection(db, 'orders'), where('ownerId', '==', user.uid)),
-      (snapshot) => {
-        setOrders(
-          snapshot.docs.map((docSnap) => {
-            const data = docSnap.data();
-            return {
-              id: docSnap.id,
-              ownerId: String(data.ownerId ?? ''),
-              clientId: String(data.clientId ?? ''),
-              orderDate: String(data.orderDate ?? ''),
-              fabricType: data.fabricType,
-              greyFabricThan: Number(data.greyFabricThan ?? 0),
-              greyFabricGaj: Number(data.greyFabricGaj ?? 0),
-              rate: Number(data.rate ?? 0),
-              status: data.status,
-              finalGaj:
-                data.finalGaj === null || data.finalGaj === undefined
-                  ? null
-                  : Number(data.finalGaj),
-              finalBillAmount:
-                data.finalBillAmount === null || data.finalBillAmount === undefined
-                  ? null
-                  : Number(data.finalBillAmount),
-              deliveredAt: data.deliveredAt ?? null,
-              createdAt: data.createdAt ?? null,
-              updatedAt: data.updatedAt ?? null,
-            };
-          })
-        );
-        setOrdersLoaded(true);
-      },
-      (error) => handleListenerError(error, 'orders')
+    unsubscribers.push(
+      onSnapshot(
+        collection(db, 'suppliers'),
+        (snapshot) => {
+          setSuppliers(
+            snapshot.docs.map((docSnap) => {
+              const data = docSnap.data();
+              return {
+                id: docSnap.id,
+                ownerId: String(data.ownerId ?? ''),
+                supplierName: String(data.supplierName ?? ''),
+                companyName: String(data.companyName ?? ''),
+                mobile: String(data.mobile ?? ''),
+                createdAt: data.createdAt ?? null,
+                updatedAt: data.updatedAt ?? null,
+              };
+            })
+          );
+          setSuppliersLoaded(true);
+        },
+        (error) => handleListenerError(error, 'suppliers')
+      )
     );
 
-    const unsubMoneyIn = onSnapshot(
-      query(collection(db, 'money_in'), where('ownerId', '==', user.uid)),
-      (snapshot) => {
-        setMoneyInRecords(
-          snapshot.docs.map((docSnap) => {
-            const data = docSnap.data();
-            const refStr = String(data.reference ?? '');
-            const isAdjustment =
-              data.source === 'adjustment' || refStr.startsWith('REV-');
-            return {
-              id: docSnap.id,
-              ownerId: String(data.ownerId ?? ''),
-              source: isAdjustment ? 'adjustment' : 'client',
-              clientId: String(data.clientId ?? ''),
-              ledgerEntryId: String(data.ledgerEntryId ?? ''),
-              reference: refStr,
-              amount: Number(data.amount ?? 0),
-              paymentDate: String(data.paymentDate ?? ''),
-              paymentMethod: data.paymentMethod,
-              note: String(data.note ?? ''),
-              createdAt: data.createdAt ?? null,
-            };
-          })
-        );
-        setMoneyInLoaded(true);
-      },
-      (error) => handleListenerError(error, 'money_in')
+    unsubscribers.push(
+      onSnapshot(
+        collection(db, 'supplier_ledger'),
+        (snapshot) => {
+          setSupplierLedgerEntries(
+            snapshot.docs.map((docSnap) => {
+              const data = docSnap.data();
+              return {
+                id: docSnap.id,
+                ownerId: String(data.ownerId ?? ''),
+                supplierId: String(data.supplierId ?? ''),
+                txn_type: data.txn_type,
+                debit: Number(data.debit ?? 0),
+                credit: Number(data.credit ?? 0),
+                reference: String(data.reference ?? ''),
+                note: String(data.note ?? ''),
+                createdAt: data.createdAt ?? null,
+              };
+            })
+          );
+          setSupplierLedgerLoaded(true);
+        },
+        (error) => handleListenerError(error, 'supplier_ledger')
+      )
     );
 
-    const unsubSuppliers = onSnapshot(
-      query(collection(db, 'suppliers'), where('ownerId', '==', user.uid)),
-      (snapshot) => {
-        setSuppliers(
-          snapshot.docs.map((docSnap) => {
-            const data = docSnap.data();
-            return {
-              id: docSnap.id,
-              ownerId: String(data.ownerId ?? ''),
-              supplierName: String(data.supplierName ?? ''),
-              companyName: String(data.companyName ?? ''),
-              mobile: String(data.mobile ?? ''),
-              createdAt: data.createdAt ?? null,
-              updatedAt: data.updatedAt ?? null,
-            };
-          })
-        );
-        setSuppliersLoaded(true);
-      },
-      (error) => handleListenerError(error, 'suppliers')
-    );
+    // 2. Production & Purchasing (Admin & Manager ONLY)
+    if (canViewOrders(userRole)) {
+      setOrdersLoaded(false);
+      setPurchasesLoaded(false);
 
-    const unsubSupplierLedger = onSnapshot(
-      query(collection(db, 'supplier_ledger'), where('ownerId', '==', user.uid)),
-      (snapshot) => {
-        setSupplierLedgerEntries(
-          snapshot.docs.map((docSnap) => {
-            const data = docSnap.data();
-            return {
-              id: docSnap.id,
-              ownerId: String(data.ownerId ?? ''),
-              supplierId: String(data.supplierId ?? ''),
-              txn_type: data.txn_type,
-              debit: Number(data.debit ?? 0),
-              credit: Number(data.credit ?? 0),
-              reference: String(data.reference ?? ''),
-              note: String(data.note ?? ''),
-              createdAt: data.createdAt ?? null,
-            };
-          })
-        );
-        setSupplierLedgerLoaded(true);
-      },
-      (error) => handleListenerError(error, 'supplier_ledger')
-    );
+      unsubscribers.push(
+        onSnapshot(
+          collection(db, 'orders'),
+          (snapshot) => {
+            setOrders(
+              snapshot.docs.map((docSnap) => {
+                const data = docSnap.data();
+                return {
+                  id: docSnap.id,
+                  ownerId: String(data.ownerId ?? ''),
+                  clientId: String(data.clientId ?? ''),
+                  orderDate: String(data.orderDate ?? ''),
+                  fabricType: data.fabricType,
+                  greyFabricThan: Number(data.greyFabricThan ?? 0),
+                  greyFabricGaj: Number(data.greyFabricGaj ?? 0),
+                  rate: Number(data.rate ?? 0),
+                  status: data.status,
+                  finalGaj:
+                    data.finalGaj === null || data.finalGaj === undefined
+                      ? null
+                      : Number(data.finalGaj),
+                  finalBillAmount:
+                    data.finalBillAmount === null ||
+                    data.finalBillAmount === undefined
+                      ? null
+                      : Number(data.finalBillAmount),
+                  deliveredAt: data.deliveredAt ?? null,
+                  createdAt: data.createdAt ?? null,
+                  updatedAt: data.updatedAt ?? null,
+                };
+              })
+            );
+            setOrdersLoaded(true);
+          },
+          (error) => handleListenerError(error, 'orders')
+        )
+      );
 
-    const unsubPurchases = onSnapshot(
-      query(collection(db, 'purchases'), where('ownerId', '==', user.uid)),
-      (snapshot) => {
-        setPurchases(
-          snapshot.docs.map((docSnap) => {
-            const data = docSnap.data();
-            return {
-              id: docSnap.id,
-              ownerId: String(data.ownerId ?? ''),
-              supplierId: String(data.supplierId ?? ''),
-              ledgerEntryId: String(data.ledgerEntryId ?? ''),
-              reference: String(data.reference ?? ''),
-              purchaseDate: String(data.purchaseDate ?? ''),
-              itemName: String(data.itemName ?? ''),
-              quantity: Number(data.quantity ?? 0),
-              unit: data.unit,
-              rate: Number(data.rate ?? 0),
-              totalAmount: Number(data.totalAmount ?? 0),
-              status: data.status === 'Paid' ? 'Paid' : 'Pending',
-              createdAt: data.createdAt ?? null,
-              updatedAt: data.updatedAt ?? null,
-            };
-          })
-        );
-        setPurchasesLoaded(true);
-      },
-      (error) => handleListenerError(error, 'purchases')
-    );
+      unsubscribers.push(
+        onSnapshot(
+          collection(db, 'purchases'),
+          (snapshot) => {
+            setPurchases(
+              snapshot.docs.map((docSnap) => {
+                const data = docSnap.data();
+                return {
+                  id: docSnap.id,
+                  ownerId: String(data.ownerId ?? ''),
+                  supplierId: String(data.supplierId ?? ''),
+                  ledgerEntryId: String(data.ledgerEntryId ?? ''),
+                  reference: String(data.reference ?? ''),
+                  purchaseDate: String(data.purchaseDate ?? ''),
+                  itemName: String(data.itemName ?? ''),
+                  quantity: Number(data.quantity ?? 0),
+                  unit: data.unit,
+                  rate: Number(data.rate ?? 0),
+                  totalAmount: Number(data.totalAmount ?? 0),
+                  status: data.status === 'Paid' ? 'Paid' : 'Pending',
+                  createdAt: data.createdAt ?? null,
+                  updatedAt: data.updatedAt ?? null,
+                };
+              })
+            );
+            setPurchasesLoaded(true);
+          },
+          (error) => handleListenerError(error, 'purchases')
+        )
+      );
+    } else {
+      setOrders([]);
+      setOrdersLoaded(true);
+      setPurchases([]);
+      setPurchasesLoaded(true);
+    }
 
-    const unsubMoneyOut = onSnapshot(
-      query(collection(db, 'money_out'), where('ownerId', '==', user.uid)),
-      (snapshot) => {
-        setMoneyOutRecords(
-          snapshot.docs.map((docSnap) => {
-            const data = docSnap.data();
-            const refStr = String(data.reference ?? '');
-            const isAdjustment =
-              data.source === 'adjustment' || refStr.startsWith('REV-');
-            const isAdvance =
-              !isAdjustment &&
-              (Boolean(data.advanceId) ||
-                refStr.startsWith('ADV-') ||
-                String(data.category ?? '') === 'Employee Advance');
-            const isExpense =
-              !isAdjustment &&
-              !isAdvance &&
-              (Boolean(data.expenseId) || refStr.startsWith('EXP-'));
-            return {
-              id: docSnap.id,
-              ownerId: String(data.ownerId ?? ''),
-              source: isAdjustment
-                ? 'adjustment'
-                : isAdvance
-                  ? 'advance'
-                  : isExpense
-                    ? 'expense'
-                    : 'supplier',
-              supplierId: String(data.supplierId ?? ''),
-              ledgerEntryId: String(data.ledgerEntryId ?? ''),
-              expenseId: String(data.expenseId ?? ''),
-              employeeId: String(data.employeeId ?? ''),
-              advanceId: String(data.advanceId ?? ''),
-              category: data.category
-                ? (String(data.category) as ExpenseCategory | 'Employee Advance')
-                : null,
-              reference: refStr,
-              amount: Number(data.amount ?? 0),
-              paymentDate: String(data.paymentDate ?? ''),
-              paymentMethod: data.paymentMethod,
-              note: String(data.note ?? ''),
-              createdAt: data.createdAt ?? null,
-            };
-          })
-        );
-        setMoneyOutLoaded(true);
-      },
-      (error) => handleListenerError(error, 'money_out')
-    );
+    // 3. Inventory & Stock Movements (Admin & Manager ONLY)
+    if (canViewInventory(userRole)) {
+      setInventoryLoaded(false);
+      setStockMovementsLoaded(false);
 
-    const unsubExpenses = onSnapshot(
-      query(collection(db, 'expenses'), where('ownerId', '==', user.uid)),
-      (snapshot) => {
-        setExpenses(
-          snapshot.docs.map((docSnap) => {
-            const data = docSnap.data();
-            return {
-              id: docSnap.id,
-              ownerId: String(data.ownerId ?? ''),
-              moneyOutId: String(data.moneyOutId ?? ''),
-              reference: String(data.reference ?? ''),
-              expenseDate: String(data.expenseDate ?? ''),
-              category: data.category as ExpenseCategory,
-              amount: Number(data.amount ?? 0),
-              paymentMethod: data.paymentMethod,
-              description: String(data.description ?? ''),
-              createdAt: data.createdAt ?? null,
-            };
-          })
-        );
-        setExpensesLoaded(true);
-      },
-      (error) => handleListenerError(error, 'expenses')
-    );
+      unsubscribers.push(
+        onSnapshot(
+          collection(db, 'inventory'),
+          (snapshot) => {
+            setInventoryItems(
+              snapshot.docs.map((docSnap) => {
+                const data = docSnap.data();
+                return {
+                  id: docSnap.id,
+                  ownerId: String(data.ownerId ?? ''),
+                  itemName: String(data.itemName ?? ''),
+                  unit: data.unit as InventoryUnit,
+                  minStockLevel: Number(data.minStockLevel ?? 0),
+                  currentStock: Number(data.currentStock ?? 0),
+                  createdAt: data.createdAt ?? null,
+                  updatedAt: data.updatedAt ?? null,
+                };
+              })
+            );
+            setInventoryLoaded(true);
+          },
+          (error) => handleListenerError(error, 'inventory')
+        )
+      );
 
-    const unsubInventory = onSnapshot(
-      query(collection(db, 'inventory'), where('ownerId', '==', user.uid)),
-      (snapshot) => {
-        setInventoryItems(
-          snapshot.docs.map((docSnap) => {
-            const data = docSnap.data();
-            return {
-              id: docSnap.id,
-              ownerId: String(data.ownerId ?? ''),
-              itemName: String(data.itemName ?? ''),
-              unit: data.unit as InventoryUnit,
-              minStockLevel: Number(data.minStockLevel ?? 0),
-              currentStock: Number(data.currentStock ?? 0),
-              createdAt: data.createdAt ?? null,
-              updatedAt: data.updatedAt ?? null,
-            };
-          })
-        );
-        setInventoryLoaded(true);
-      },
-      (error) => handleListenerError(error, 'inventory')
-    );
+      unsubscribers.push(
+        onSnapshot(
+          collection(db, 'stock_movements'),
+          (snapshot) => {
+            setStockMovements(
+              snapshot.docs.map((docSnap) => {
+                const data = docSnap.data();
+                return {
+                  id: docSnap.id,
+                  ownerId: String(data.ownerId ?? ''),
+                  inventoryItemId: String(data.inventoryItemId ?? ''),
+                  itemName: String(data.itemName ?? ''),
+                  unit: data.unit as InventoryUnit,
+                  type: data.type as StockMovementType,
+                  quantity: Number(data.quantity ?? 0),
+                  previousStock: Number(data.previousStock ?? 0),
+                  resultingStock: Number(data.resultingStock ?? 0),
+                  movementDate: String(data.movementDate ?? ''),
+                  reference: String(data.reference ?? ''),
+                  note: String(data.note ?? ''),
+                  createdAt: data.createdAt ?? null,
+                };
+              })
+            );
+            setStockMovementsLoaded(true);
+          },
+          (error) => handleListenerError(error, 'stock_movements')
+        )
+      );
+    } else {
+      setInventoryItems([]);
+      setInventoryLoaded(true);
+      setStockMovements([]);
+      setStockMovementsLoaded(true);
+    }
 
-    const unsubStockMovements = onSnapshot(
-      query(
-        collection(db, 'stock_movements'),
-        where('ownerId', '==', user.uid)
-      ),
-      (snapshot) => {
-        setStockMovements(
-          snapshot.docs.map((docSnap) => {
-            const data = docSnap.data();
-            return {
-              id: docSnap.id,
-              ownerId: String(data.ownerId ?? ''),
-              inventoryItemId: String(data.inventoryItemId ?? ''),
-              itemName: String(data.itemName ?? ''),
-              unit: data.unit as InventoryUnit,
-              type: data.type as StockMovementType,
-              quantity: Number(data.quantity ?? 0),
-              previousStock: Number(data.previousStock ?? 0),
-              resultingStock: Number(data.resultingStock ?? 0),
-              movementDate: String(data.movementDate ?? ''),
-              reference: String(data.reference ?? ''),
-              note: String(data.note ?? ''),
-              createdAt: data.createdAt ?? null,
-            };
-          })
-        );
-        setStockMovementsLoaded(true);
-      },
-      (error) => handleListenerError(error, 'stock_movements')
-    );
+    // 4. Cashflow & Expenses (Admin & Accountant ONLY)
+    if (canViewCashflow(userRole)) {
+      setMoneyInLoaded(false);
+      setMoneyOutLoaded(false);
+      setExpensesLoaded(false);
 
-    const unsubEmployees = onSnapshot(
-      query(collection(db, 'employees'), where('ownerId', '==', user.uid)),
-      (snapshot) => {
-        setEmployees(
-          snapshot.docs.map((docSnap) => {
-            const data = docSnap.data();
-            return {
-              id: docSnap.id,
-              ownerId: String(data.ownerId ?? ''),
-              name: String(data.name ?? ''),
-              mobile: String(data.mobile ?? ''),
-              department: String(data.department ?? ''),
-              joiningDate: String(data.joiningDate ?? ''),
-              basicSalary: Number(data.basicSalary ?? 0),
-              createdAt: data.createdAt ?? null,
-              updatedAt: data.updatedAt ?? null,
-            };
-          })
-        );
-        setEmployeesLoaded(true);
-      },
-      (error) => handleListenerError(error, 'employees')
-    );
+      unsubscribers.push(
+        onSnapshot(
+          collection(db, 'money_in'),
+          (snapshot) => {
+            setMoneyInRecords(
+              snapshot.docs.map((docSnap) => {
+                const data = docSnap.data();
+                const refStr = String(data.reference ?? '');
+                const isAdjustment =
+                  data.source === 'adjustment' || refStr.startsWith('REV-');
+                return {
+                  id: docSnap.id,
+                  ownerId: String(data.ownerId ?? ''),
+                  source: isAdjustment ? 'adjustment' : 'client',
+                  clientId: String(data.clientId ?? ''),
+                  ledgerEntryId: String(data.ledgerEntryId ?? ''),
+                  reference: refStr,
+                  amount: Number(data.amount ?? 0),
+                  paymentDate: String(data.paymentDate ?? ''),
+                  paymentMethod: data.paymentMethod,
+                  note: String(data.note ?? ''),
+                  createdAt: data.createdAt ?? null,
+                };
+              })
+            );
+            setMoneyInLoaded(true);
+          },
+          (error) => handleListenerError(error, 'money_in')
+        )
+      );
 
-    const unsubEmployeeAdvances = onSnapshot(
-      query(
-        collection(db, 'employee_advances'),
-        where('ownerId', '==', user.uid)
-      ),
-      (snapshot) => {
-        setEmployeeAdvances(
-          snapshot.docs.map((docSnap) => {
-            const data = docSnap.data();
-            return {
-              id: docSnap.id,
-              ownerId: String(data.ownerId ?? ''),
-              employeeId: String(data.employeeId ?? ''),
-              employeeName: String(data.employeeName ?? ''),
-              department: String(data.department ?? ''),
-              moneyOutId: String(data.moneyOutId ?? ''),
-              reference: String(data.reference ?? ''),
-              amount: Number(data.amount ?? 0),
-              advanceDate: String(data.advanceDate ?? ''),
-              paymentMethod: data.paymentMethod as AdvancePaymentMethod,
-              note: String(data.note ?? ''),
-              createdAt: data.createdAt ?? null,
-            };
-          })
-        );
-        setEmployeeAdvancesLoaded(true);
-      },
-      (error) => handleListenerError(error, 'employee_advances')
-    );
+      unsubscribers.push(
+        onSnapshot(
+          collection(db, 'money_out'),
+          (snapshot) => {
+            setMoneyOutRecords(
+              snapshot.docs.map((docSnap) => {
+                const data = docSnap.data();
+                const refStr = String(data.reference ?? '');
+                const isAdjustment =
+                  data.source === 'adjustment' || refStr.startsWith('REV-');
+                const isAdvance =
+                  !isAdjustment &&
+                  (Boolean(data.advanceId) ||
+                    refStr.startsWith('ADV-') ||
+                    String(data.category ?? '') === 'Employee Advance');
+                const isExpense =
+                  !isAdjustment &&
+                  !isAdvance &&
+                  (Boolean(data.expenseId) || refStr.startsWith('EXP-'));
+                return {
+                  id: docSnap.id,
+                  ownerId: String(data.ownerId ?? ''),
+                  source: isAdjustment
+                    ? 'adjustment'
+                    : isAdvance
+                      ? 'advance'
+                      : isExpense
+                        ? 'expense'
+                        : 'supplier',
+                  supplierId: String(data.supplierId ?? ''),
+                  ledgerEntryId: String(data.ledgerEntryId ?? ''),
+                  expenseId: String(data.expenseId ?? ''),
+                  employeeId: String(data.employeeId ?? ''),
+                  advanceId: String(data.advanceId ?? ''),
+                  category: data.category
+                    ? (String(data.category) as
+                        | ExpenseCategory
+                        | 'Employee Advance')
+                    : null,
+                  reference: refStr,
+                  amount: Number(data.amount ?? 0),
+                  paymentDate: String(data.paymentDate ?? ''),
+                  paymentMethod: data.paymentMethod,
+                  note: String(data.note ?? ''),
+                  createdAt: data.createdAt ?? null,
+                };
+              })
+            );
+            setMoneyOutLoaded(true);
+          },
+          (error) => handleListenerError(error, 'money_out')
+        )
+      );
+
+      unsubscribers.push(
+        onSnapshot(
+          collection(db, 'expenses'),
+          (snapshot) => {
+            setExpenses(
+              snapshot.docs.map((docSnap) => {
+                const data = docSnap.data();
+                return {
+                  id: docSnap.id,
+                  ownerId: String(data.ownerId ?? ''),
+                  moneyOutId: String(data.moneyOutId ?? ''),
+                  reference: String(data.reference ?? ''),
+                  expenseDate: String(data.expenseDate ?? ''),
+                  category: data.category as ExpenseCategory,
+                  amount: Number(data.amount ?? 0),
+                  paymentMethod: data.paymentMethod,
+                  description: String(data.description ?? ''),
+                  createdAt: data.createdAt ?? null,
+                };
+              })
+            );
+            setExpensesLoaded(true);
+          },
+          (error) => handleListenerError(error, 'expenses')
+        )
+      );
+    } else {
+      setMoneyInRecords([]);
+      setMoneyInLoaded(true);
+      setMoneyOutRecords([]);
+      setMoneyOutLoaded(true);
+      setExpenses([]);
+      setExpensesLoaded(true);
+    }
+
+    // 5. Employees, Advances & User Management (Admin ONLY)
+    if (canViewEmployees(userRole)) {
+      setEmployeesLoaded(false);
+      setEmployeeAdvancesLoaded(false);
+      setUsersLoaded(false);
+
+      unsubscribers.push(
+        onSnapshot(
+          collection(db, 'employees'),
+          (snapshot) => {
+            setEmployees(
+              snapshot.docs.map((docSnap) => {
+                const data = docSnap.data();
+                return {
+                  id: docSnap.id,
+                  ownerId: String(data.ownerId ?? ''),
+                  name: String(data.name ?? ''),
+                  mobile: String(data.mobile ?? ''),
+                  department: String(data.department ?? ''),
+                  joiningDate: String(data.joiningDate ?? ''),
+                  basicSalary: Number(data.basicSalary ?? 0),
+                  createdAt: data.createdAt ?? null,
+                  updatedAt: data.updatedAt ?? null,
+                };
+              })
+            );
+            setEmployeesLoaded(true);
+          },
+          (error) => handleListenerError(error, 'employees')
+        )
+      );
+
+      unsubscribers.push(
+        onSnapshot(
+          collection(db, 'employee_advances'),
+          (snapshot) => {
+            setEmployeeAdvances(
+              snapshot.docs.map((docSnap) => {
+                const data = docSnap.data();
+                return {
+                  id: docSnap.id,
+                  ownerId: String(data.ownerId ?? ''),
+                  employeeId: String(data.employeeId ?? ''),
+                  employeeName: String(data.employeeName ?? ''),
+                  department: String(data.department ?? ''),
+                  moneyOutId: String(data.moneyOutId ?? ''),
+                  reference: String(data.reference ?? ''),
+                  amount: Number(data.amount ?? 0),
+                  advanceDate: String(data.advanceDate ?? ''),
+                  paymentMethod: data.paymentMethod as AdvancePaymentMethod,
+                  note: String(data.note ?? ''),
+                  createdAt: data.createdAt ?? null,
+                };
+              })
+            );
+            setEmployeeAdvancesLoaded(true);
+          },
+          (error) => handleListenerError(error, 'employee_advances')
+        )
+      );
+
+      unsubscribers.push(
+        onSnapshot(
+          collection(db, 'users'),
+          (snapshot) => {
+            setRegisteredUsers(
+              snapshot.docs.map((docSnap) => {
+                const data = docSnap.data();
+                const rawRole = String(data.role ?? 'manager');
+                const parsedRole: UserRole =
+                  rawRole === 'admin' ||
+                  rawRole === 'manager' ||
+                  rawRole === 'accountant'
+                    ? rawRole
+                    : 'manager';
+                return {
+                  uid: String(data.uid ?? docSnap.id),
+                  email: String(data.email ?? ''),
+                  displayName: String(data.displayName ?? ''),
+                  role: parsedRole,
+                  createdAt: data.createdAt ?? null,
+                  updatedAt: data.updatedAt ?? null,
+                };
+              })
+            );
+            setUsersLoaded(true);
+          },
+          (error) => handleListenerError(error, 'users')
+        )
+      );
+    } else {
+      setEmployees([]);
+      setEmployeesLoaded(true);
+      setEmployeeAdvances([]);
+      setEmployeeAdvancesLoaded(true);
+      setRegisteredUsers([]);
+      setUsersLoaded(true);
+    }
 
     return () => {
-      unsubClients();
-      unsubLedger();
-      unsubOrders();
-      unsubMoneyIn();
-      unsubSuppliers();
-      unsubSupplierLedger();
-      unsubPurchases();
-      unsubMoneyOut();
-      unsubExpenses();
-      unsubInventory();
-      unsubStockMovements();
-      unsubEmployees();
-      unsubEmployeeAdvances();
+      for (const unsub of unsubscribers) {
+        unsub();
+      }
     };
-  }, [authReady, user]);
+  }, [authReady, user, userProfileLoaded, userRole]);
 
   // Auto-dismiss feedback toast
   useEffect(() => {
@@ -848,12 +1118,12 @@ function MillDashboardShell() {
     throw fatalError;
   }
 
-  if (!authReady) {
+  if (!authReady || (user && !userProfileLoaded)) {
     return (
       <div className="min-h-screen bg-[#f7f8fa] flex items-center justify-center">
         <div className="text-center space-y-3">
           <div className="w-8 h-8 border-2 border-slate-300 border-t-[#1e3a8a] rounded-full animate-spin mx-auto" />
-          <p className="text-sm text-slate-600">Loading IndigoMill Ledger...</p>
+          <p className="text-sm text-slate-600">{t('app.loading')}</p>
         </div>
       </div>
     );
@@ -876,88 +1146,95 @@ function MillDashboardShell() {
     !inventoryLoaded ||
     !stockMovementsLoaded ||
     !employeesLoaded ||
-    !employeeAdvancesLoaded;
+    !employeeAdvancesLoaded ||
+    !usersLoaded;
+
+  const isAccountantView = userRole === 'accountant';
 
   const sectionMeta: Record<
     NavSection,
     { breadcrumb: string; title: string; subtitle: string }
   > = {
     clients: {
-      breadcrumb: 'Receivables & Orders / Client Management',
-      title: 'Client Management',
-      subtitle:
-        'Manage mill buyers, receive payments, and monitor live Current Due calculated dynamically from client_ledger.',
+      breadcrumb: `${t('nav.group.receivables')} / ${
+        isAccountantView ? t('nav.clientPayments') : t('nav.clients')
+      }`,
+      title: isAccountantView
+        ? t('nav.clientPayments')
+        : t('page.clients.title'),
+      subtitle: t('page.clients.subtitle'),
     },
     orders: {
-      breadcrumb: 'Receivables & Orders / Orders & Delivery',
-      title: 'Orders & Delivery',
-      subtitle:
-        'Track dyeing and washing batches and trigger automatic invoice billing upon Complete & Deliver.',
+      breadcrumb: `${t('nav.group.receivables')} / ${t('nav.orders')}`,
+      title: t('page.orders.title'),
+      subtitle: t('page.orders.subtitle'),
     },
     'new-order': {
-      breadcrumb: 'Receivables & Orders / Orders & Delivery / New Order',
-      title: 'Create New Order',
-      subtitle:
-        'Register a new grey fabric intake batch with fabric type, Than, Gaj, and agreed rate.',
+      breadcrumb: `${t('nav.group.receivables')} / ${t('nav.orders')} / ${t('nav.newOrder')}`,
+      title: t('page.newOrder.title'),
+      subtitle: t('page.newOrder.subtitle'),
     },
     suppliers: {
-      breadcrumb: 'Payables & Inventory / Suppliers',
-      title: 'Suppliers',
-      subtitle:
-        'Manage dye, chemical, jute, and spare parts vendors with live Total Payable calculated dynamically as Sum(Credit) − Sum(Debit).',
+      breadcrumb: `${t('nav.group.payables')} / ${
+        isAccountantView ? t('nav.supplierPayments') : t('nav.suppliers')
+      }`,
+      title: isAccountantView
+        ? t('nav.supplierPayments')
+        : t('page.suppliers.title'),
+      subtitle: t('page.suppliers.subtitle'),
     },
     purchases: {
-      breadcrumb: 'Payables & Inventory / Purchases',
-      title: 'Purchases',
-      subtitle:
-        'Inventory purchase log automatically crediting supplier_ledger for every vendor invoice.',
+      breadcrumb: `${t('nav.group.payables')} / ${t('nav.purchases')}`,
+      title: t('page.purchases.title'),
+      subtitle: t('page.purchases.subtitle'),
     },
     'new-purchase': {
-      breadcrumb: 'Payables & Inventory / Purchases / New Purchase',
-      title: 'New Purchase',
-      subtitle:
-        'Record raw material or spare parts procurement, update supplier payables, and auto-restock linked inventory.',
+      breadcrumb: `${t('nav.group.payables')} / ${t('nav.purchases')} / ${t('nav.newPurchase')}`,
+      title: t('page.newPurchase.title'),
+      subtitle: t('page.newPurchase.subtitle'),
     },
     inventory: {
-      breadcrumb: 'Payables & Inventory / Inventory & Chemicals',
-      title: 'Inventory & Chemical Management',
-      subtitle:
-        'Track dyes, bleaching chemicals, jute, and spare parts with low-stock alerts, Stock In/Out logs, and automatic purchase restocking.',
+      breadcrumb: `${t('nav.group.payables')} / ${t('nav.inventory')}`,
+      title: t('page.inventory.title'),
+      subtitle: t('page.inventory.subtitle'),
     },
     expenses: {
-      breadcrumb: 'Staff & Factory Costs / Expenses',
-      title: 'Expense Management',
-      subtitle:
-        'Track daily factory operating costs (salaries, electricity, rent, maintenance) with automatic cash outflow updates.',
+      breadcrumb: `${t('nav.group.staffCosts')} / ${t('nav.expenses')}`,
+      title: t('page.expenses.title'),
+      subtitle: t('page.expenses.subtitle'),
     },
     employees: {
-      breadcrumb: 'Staff & Factory Costs / Employees',
-      title: 'Employee Management',
-      subtitle:
-        'Track mill staff, basic monthly salaries, and weekly advances synced atomically with live cash outflows.',
+      breadcrumb: `${t('nav.group.staffCosts')} / ${t('nav.employees')}`,
+      title: t('page.employees.title'),
+      subtitle: t('page.employees.subtitle'),
     },
     overview: {
-      breadcrumb: 'Overview / Dashboard Overview',
-      title: 'Dashboard Overview',
-      subtitle:
-        'Live financial position, production order status, and recent cash and mill activity.',
+      breadcrumb: `${t('nav.group.overview')} / ${t('nav.overview')}`,
+      title: t('page.overview.title'),
+      subtitle: t('page.overview.subtitle'),
     },
     ledger: {
-      breadcrumb: 'Reports & Ledgers / Client Ledger Book',
-      title: 'Client Ledger Book',
-      subtitle:
-        'Complete append-only register of opening dues, order bills, and payment receipts.',
+      breadcrumb: `${t('nav.group.reports')} / ${t('nav.ledger')}`,
+      title: t('page.ledger.title'),
+      subtitle: t('page.ledger.subtitle'),
+    },
+    users: {
+      breadcrumb: `${t('nav.group.admin')} / ${t('nav.users')}`,
+      title: t('page.users.title'),
+      subtitle: t('page.users.subtitle'),
     },
   };
 
   const currentMeta = sectionMeta[activeSection];
 
   const handleOpenAddClient = () => {
+    if (!canCreatePartners) return;
     setEditingClient(null);
     setClientDrawerOpen(true);
   };
 
   const handleOpenEditClient = (client: ClientRecord) => {
+    if (!isAdmin) return;
     setEditingClient(client);
     setClientDrawerOpen(true);
   };
@@ -971,11 +1248,13 @@ function MillDashboardShell() {
   };
 
   const handleOpenAddSupplier = () => {
+    if (!canCreatePartners) return;
     setEditingSupplier(null);
     setSupplierDrawerOpen(true);
   };
 
   const handleOpenEditSupplier = (supplier: SupplierRecord) => {
+    if (!isAdmin) return;
     setEditingSupplier(supplier);
     setSupplierDrawerOpen(true);
   };
@@ -988,8 +1267,9 @@ function MillDashboardShell() {
     setSelectedSupplierId(supplier.id);
   };
 
-  // Master Data & Pending/Processing Transaction Delete Helpers
+  // Master Data & Pending/Processing Transaction Delete Helpers (Admin ONLY)
   const handleRequestDeleteClient = (client: ClientRecord) => {
+    if (!isAdmin) return;
     setDeleteTarget({
       title: 'Delete Client Profile',
       entityLabel: `${client.clientName} (${client.companyName})`,
@@ -1017,6 +1297,7 @@ function MillDashboardShell() {
   };
 
   const handleRequestDeleteSupplier = (supplier: SupplierRecord) => {
+    if (!isAdmin) return;
     setDeleteTarget({
       title: 'Delete Supplier Profile',
       entityLabel: `${supplier.supplierName} (${supplier.companyName})`,
@@ -1048,6 +1329,7 @@ function MillDashboardShell() {
   };
 
   const handleRequestDeleteEmployee = (employee: EmployeeRecord) => {
+    if (!isAdmin) return;
     setDeleteTarget({
       title: 'Delete Employee Profile',
       entityLabel: `${employee.name} (${employee.department})`,
@@ -1075,6 +1357,7 @@ function MillDashboardShell() {
   };
 
   const handleRequestDeleteInventoryItem = (item: InventoryItem) => {
+    if (!isAdmin) return;
     setDeleteTarget({
       title: 'Delete Inventory Item',
       entityLabel: `${item.itemName} (${formatNumber(item.currentStock)} ${item.unit})`,
@@ -1099,6 +1382,7 @@ function MillDashboardShell() {
   };
 
   const handleRequestDeleteOrder = (order: OrderRecord) => {
+    if (!isAdmin) return;
     if (order.status !== 'Processing') {
       setToast({
         message: 'Only orders in "Processing" status can be deleted.',
@@ -1126,6 +1410,7 @@ function MillDashboardShell() {
   };
 
   const handleRequestDeletePurchase = (purchase: PurchaseRecord) => {
+    if (!isAdmin) return;
     if (purchase.status === 'Paid') {
       setToast({
         message: 'Paid purchases are locked and cannot be deleted.',
@@ -1158,6 +1443,7 @@ function MillDashboardShell() {
 
   // Append-Only Ledger Reversal / Adjustment Helpers
   const handleOpenCorrectClientLedger = (entry: ClientLedgerEntry) => {
+    if (!canAdjust) return;
     const client = clientsById.get(entry.clientId) ?? null;
     const linkedMoneyIn =
       moneyInRecords.find(
@@ -1174,6 +1460,7 @@ function MillDashboardShell() {
   };
 
   const handleOpenCorrectSupplierLedger = (entry: SupplierLedgerEntry) => {
+    if (!canAdjust) return;
     const supplier = suppliersById.get(entry.supplierId) ?? null;
     const linkedMoneyOut =
       moneyOutRecords.find(
@@ -1190,6 +1477,7 @@ function MillDashboardShell() {
   };
 
   const handleOpenCorrectMoneyIn = (record: MoneyInRecord) => {
+    if (!canAdjust) return;
     const client = clientsById.get(record.clientId) ?? null;
     const linkedLedgerEntry =
       ledgerEntries.find(
@@ -1206,6 +1494,7 @@ function MillDashboardShell() {
   };
 
   const handleOpenCorrectMoneyOut = (record: MoneyOutRecord) => {
+    if (!canAdjust) return;
     const supplier = record.supplierId
       ? suppliersById.get(record.supplierId) ?? null
       : null;
@@ -1329,27 +1618,58 @@ function MillDashboardShell() {
   };
 
   const renderTopBarCta = () => {
-    if (activeSection === 'orders' || activeSection === 'overview') {
+    if (activeSection === 'overview') {
+      if (allowOrders) {
+        return (
+          <button
+            type="button"
+            onClick={() => setActiveSection('new-order')}
+            className="inline-flex items-center gap-2 px-3.5 sm:px-4 py-2 text-xs sm:text-sm font-medium text-white bg-[#1e3a8a] hover:bg-[#1e40af] rounded-md transition-colors cursor-pointer whitespace-nowrap shrink-0"
+          >
+            <Plus className="w-4 h-4 shrink-0" />
+            {t('cta.newOrder')}
+          </button>
+        );
+      }
+      if (allowCashflow) {
+        return (
+          <button
+            type="button"
+            onClick={() => {
+              setActiveSection('expenses');
+              setExpenseFormFocusSignal((n) => n + 1);
+            }}
+            className="inline-flex items-center gap-2 px-3.5 sm:px-4 py-2 text-xs sm:text-sm font-medium text-white bg-[#1e3a8a] hover:bg-[#1e40af] rounded-md transition-colors cursor-pointer whitespace-nowrap shrink-0"
+          >
+            <Plus className="w-4 h-4 shrink-0" />
+            {t('cta.addExpense')}
+          </button>
+        );
+      }
+      return null;
+    }
+    if (activeSection === 'orders') {
       return (
         <button
           type="button"
           onClick={() => setActiveSection('new-order')}
-          className="inline-flex items-center gap-2 px-4 py-2 text-xs sm:text-sm font-medium text-white bg-[#1e3a8a] hover:bg-[#1e40af] rounded-md transition-colors cursor-pointer whitespace-nowrap shrink-0"
+          className="inline-flex items-center gap-2 px-3.5 sm:px-4 py-2 text-xs sm:text-sm font-medium text-white bg-[#1e3a8a] hover:bg-[#1e40af] rounded-md transition-colors cursor-pointer whitespace-nowrap shrink-0"
         >
           <Plus className="w-4 h-4 shrink-0" />
-          New Order
+          {t('cta.newOrder')}
         </button>
       );
     }
-    if (activeSection === 'suppliers') {
+    if (activeSection === 'suppliers' || activeSection === 'new-purchase') {
+      if (!canCreatePartners) return null;
       return (
         <button
           type="button"
           onClick={handleOpenAddSupplier}
-          className="inline-flex items-center gap-2 px-4 py-2 text-xs sm:text-sm font-medium text-white bg-[#1e3a8a] hover:bg-[#1e40af] rounded-md transition-colors cursor-pointer whitespace-nowrap shrink-0"
+          className="inline-flex items-center gap-2 px-3.5 sm:px-4 py-2 text-xs sm:text-sm font-medium text-white bg-[#1e3a8a] hover:bg-[#1e40af] rounded-md transition-colors cursor-pointer whitespace-nowrap shrink-0"
         >
           <Plus className="w-4 h-4 shrink-0" />
-          Add New Supplier
+          {t('cta.addNewSupplier')}
         </button>
       );
     }
@@ -1358,22 +1678,10 @@ function MillDashboardShell() {
         <button
           type="button"
           onClick={() => setActiveSection('new-purchase')}
-          className="inline-flex items-center gap-2 px-4 py-2 text-xs sm:text-sm font-medium text-white bg-[#1e3a8a] hover:bg-[#1e40af] rounded-md transition-colors cursor-pointer whitespace-nowrap shrink-0"
+          className="inline-flex items-center gap-2 px-3.5 sm:px-4 py-2 text-xs sm:text-sm font-medium text-white bg-[#1e3a8a] hover:bg-[#1e40af] rounded-md transition-colors cursor-pointer whitespace-nowrap shrink-0"
         >
           <Plus className="w-4 h-4 shrink-0" />
-          New Purchase
-        </button>
-      );
-    }
-    if (activeSection === 'new-purchase') {
-      return (
-        <button
-          type="button"
-          onClick={handleOpenAddSupplier}
-          className="inline-flex items-center gap-2 px-4 py-2 text-xs sm:text-sm font-medium text-white bg-[#1e3a8a] hover:bg-[#1e40af] rounded-md transition-colors cursor-pointer whitespace-nowrap shrink-0"
-        >
-          <Plus className="w-4 h-4 shrink-0" />
-          Add New Supplier
+          {t('cta.newPurchase')}
         </button>
       );
     }
@@ -1382,10 +1690,10 @@ function MillDashboardShell() {
         <button
           type="button"
           onClick={() => setInventoryFormFocusSignal((n) => n + 1)}
-          className="inline-flex items-center gap-2 px-4 py-2 text-xs sm:text-sm font-medium text-white bg-[#1e3a8a] hover:bg-[#1e40af] rounded-md transition-colors cursor-pointer whitespace-nowrap shrink-0"
+          className="inline-flex items-center gap-2 px-3.5 sm:px-4 py-2 text-xs sm:text-sm font-medium text-white bg-[#1e3a8a] hover:bg-[#1e40af] rounded-md transition-colors cursor-pointer whitespace-nowrap shrink-0"
         >
           <Plus className="w-4 h-4 shrink-0" />
-          Add Item
+          {t('cta.addItem')}
         </button>
       );
     }
@@ -1394,10 +1702,10 @@ function MillDashboardShell() {
         <button
           type="button"
           onClick={() => setExpenseFormFocusSignal((n) => n + 1)}
-          className="inline-flex items-center gap-2 px-4 py-2 text-xs sm:text-sm font-medium text-white bg-[#1e3a8a] hover:bg-[#1e40af] rounded-md transition-colors cursor-pointer whitespace-nowrap shrink-0"
+          className="inline-flex items-center gap-2 px-3.5 sm:px-4 py-2 text-xs sm:text-sm font-medium text-white bg-[#1e3a8a] hover:bg-[#1e40af] rounded-md transition-colors cursor-pointer whitespace-nowrap shrink-0"
         >
           <Plus className="w-4 h-4 shrink-0" />
-          Add Expense
+          {t('cta.addExpense')}
         </button>
       );
     }
@@ -1406,23 +1714,27 @@ function MillDashboardShell() {
         <button
           type="button"
           onClick={() => setEmployeeFormFocusSignal((n) => n + 1)}
-          className="inline-flex items-center gap-2 px-4 py-2 text-xs sm:text-sm font-medium text-white bg-[#1e3a8a] hover:bg-[#1e40af] rounded-md transition-colors cursor-pointer whitespace-nowrap shrink-0"
+          className="inline-flex items-center gap-2 px-3.5 sm:px-4 py-2 text-xs sm:text-sm font-medium text-white bg-[#1e3a8a] hover:bg-[#1e40af] rounded-md transition-colors cursor-pointer whitespace-nowrap shrink-0"
         >
           <Plus className="w-4 h-4 shrink-0" />
-          Add Employee
+          {t('cta.addEmployee')}
         </button>
       );
     }
-    return (
-      <button
-        type="button"
-        onClick={handleOpenAddClient}
-        className="inline-flex items-center gap-2 px-4 py-2 text-xs sm:text-sm font-medium text-white bg-[#1e3a8a] hover:bg-[#1e40af] rounded-md transition-colors cursor-pointer whitespace-nowrap shrink-0"
-      >
-        <Plus className="w-4 h-4 shrink-0" />
-        Add New Client
-      </button>
-    );
+    if (activeSection === 'clients' || activeSection === 'new-order') {
+      if (!canCreatePartners) return null;
+      return (
+        <button
+          type="button"
+          onClick={handleOpenAddClient}
+          className="inline-flex items-center gap-2 px-3.5 sm:px-4 py-2 text-xs sm:text-sm font-medium text-white bg-[#1e3a8a] hover:bg-[#1e40af] rounded-md transition-colors cursor-pointer whitespace-nowrap shrink-0"
+        >
+          <Plus className="w-4 h-4 shrink-0" />
+          {t('cta.addNewClient')}
+        </button>
+      );
+    }
+    return null;
   };
 
   return (
@@ -1432,6 +1744,7 @@ function MillDashboardShell() {
         activeSection={activeSection}
         onSelectSection={setActiveSection}
         user={user}
+        userRole={userRole}
         onSignOut={handleSignOut}
         clientCount={clients.length}
         orderCount={orders.length}
@@ -1442,13 +1755,14 @@ function MillDashboardShell() {
         expenseCount={expenses.length}
         employeeCount={employees.length}
         ledgerCount={ledgerEntries.length}
+        userCount={registeredUsers.length}
         mobileOpen={mobileMenuOpen}
         onCloseMobile={() => setMobileMenuOpen(false)}
       />
 
       <div className="flex-1 min-w-0 flex flex-col">
         {/* Top Bar */}
-        <header className="h-16 bg-white border-b border-slate-200 px-4 sm:px-8 flex items-center justify-between gap-4 sticky top-0 z-30">
+        <header className="h-16 bg-white border-b border-slate-200 px-4 sm:px-8 flex items-center justify-between gap-3 sticky top-0 z-30">
           <div className="flex items-center gap-3 min-w-0">
             <button
               type="button"
@@ -1463,7 +1777,27 @@ function MillDashboardShell() {
             </p>
           </div>
 
-          {renderTopBarCta()}
+          <div className="flex items-center gap-2.5 sm:gap-3 shrink-0">
+            {/* Language Toggle Dropdown (English / বাংলা) */}
+            <div className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-50 border border-slate-200 hover:border-slate-300 rounded-md transition-colors">
+              <Globe className="w-3.5 h-3.5 text-[#1e3a8a] shrink-0" />
+              <label htmlFor="app-language-select" className="sr-only">
+                {t('app.language')}
+              </label>
+              <select
+                id="app-language-select"
+                aria-label={t('app.language')}
+                value={lang}
+                onChange={(e) => setLang(e.target.value as Language)}
+                className="text-xs font-medium text-slate-700 bg-transparent focus:outline-none cursor-pointer pr-1"
+              >
+                <option value="en">English</option>
+                <option value="bn">বাংলা</option>
+              </select>
+            </div>
+
+            {renderTopBarCta()}
+          </div>
         </header>
 
         {/* Main Viewport */}
@@ -1514,6 +1848,9 @@ function MillDashboardShell() {
             <ClientManagementView
               summaries={summaries}
               isLoading={isDataLoading}
+              isAdmin={isAdmin}
+              canCreateClient={canCreatePartners}
+              canManagePayments={canPay}
               onAddClient={handleOpenAddClient}
               onEditClient={handleOpenEditClient}
               onDeleteClient={handleRequestDeleteClient}
@@ -1522,15 +1859,18 @@ function MillDashboardShell() {
             />
           )}
 
-          {activeSection === 'orders' && (
+          {activeSection === 'orders' && allowOrders && (
             <OrdersListView
               orders={orders}
               clientsById={clientsById}
               summariesByClientId={summariesByClientId}
               isLoading={isDataLoading}
+              isAdmin={isAdmin}
               onCreateNewOrder={() => setActiveSection('new-order')}
               onStartCompleteDeliver={(order) => setDeliveringOrderId(order.id)}
-              onEditOrder={(order) => setEditingOrder(order)}
+              onEditOrder={(order) => {
+                if (isAdmin) setEditingOrder(order);
+              }}
               onDeleteOrder={handleRequestDeleteOrder}
               onOpenClientLedger={(client) =>
                 handleOpenClientDrawer(client, 'ledger')
@@ -1545,7 +1885,7 @@ function MillDashboardShell() {
             />
           )}
 
-          {activeSection === 'new-order' && (
+          {activeSection === 'new-order' && allowOrders && (
             <NewOrderPage
               ownerId={user.uid}
               clients={clients}
@@ -1564,6 +1904,9 @@ function MillDashboardShell() {
             <SupplierManagementView
               summaries={supplierSummaries}
               isLoading={isDataLoading}
+              isAdmin={isAdmin}
+              canCreateSupplier={canCreatePartners}
+              canManagePayments={canPay}
               onAddSupplier={handleOpenAddSupplier}
               onEditSupplier={handleOpenEditSupplier}
               onDeleteSupplier={handleRequestDeleteSupplier}
@@ -1574,23 +1917,26 @@ function MillDashboardShell() {
             />
           )}
 
-          {activeSection === 'purchases' && (
+          {activeSection === 'purchases' && allowOrders && (
             <PurchasesListView
               purchases={purchases}
               suppliersById={suppliersById}
               summariesBySupplierId={summariesBySupplierId}
               isLoading={isDataLoading}
+              isAdmin={isAdmin}
               onCreateNewPurchase={() => setActiveSection('new-purchase')}
               onOpenSupplierLedger={(supplier) =>
                 handleOpenSupplierDrawer(supplier, 'ledger')
               }
-              onEditPurchase={(purchase) => setEditingPurchase(purchase)}
+              onEditPurchase={(purchase) => {
+                if (isAdmin) setEditingPurchase(purchase);
+              }}
               onDeletePurchase={handleRequestDeletePurchase}
               onStatusUpdated={(message) => setToast({ message })}
             />
           )}
 
-          {activeSection === 'new-purchase' && (
+          {activeSection === 'new-purchase' && allowOrders && (
             <NewPurchasePage
               ownerId={user.uid}
               suppliers={suppliers}
@@ -1618,12 +1964,13 @@ function MillDashboardShell() {
             />
           )}
 
-          {activeSection === 'inventory' && (
+          {activeSection === 'inventory' && allowInventory && (
             <InventoryView
               ownerId={user.uid}
               items={inventoryItems}
               movements={stockMovements}
               isLoading={isDataLoading}
+              isAdmin={isAdmin}
               focusFormSignal={inventoryFormFocusSignal}
               onNavigateNewPurchase={() => setActiveSection('new-purchase')}
               onDeleteItem={handleRequestDeleteInventoryItem}
@@ -1631,7 +1978,7 @@ function MillDashboardShell() {
             />
           )}
 
-          {activeSection === 'expenses' && (
+          {activeSection === 'expenses' && allowCashflow && (
             <ExpensesView
               ownerId={user.uid}
               expenses={expenses}
@@ -1649,13 +1996,14 @@ function MillDashboardShell() {
             />
           )}
 
-          {activeSection === 'employees' && (
+          {activeSection === 'employees' && allowEmployees && (
             <EmployeesView
               ownerId={user.uid}
               employees={employees}
               advances={employeeAdvances}
               moneyOutRecords={moneyOutRecords}
               isLoading={isDataLoading}
+              isAdmin={isAdmin}
               focusFormSignal={employeeFormFocusSignal}
               onEmployeeCreated={(employeeName, department) => {
                 setToast({
@@ -1672,8 +2020,9 @@ function MillDashboardShell() {
             />
           )}
 
-          {activeSection === 'overview' && (
+          {activeSection === 'overview' && allowCashflow && (
             <DashboardOverview
+              userRole={userRole}
               ledgerEntries={ledgerEntries}
               supplierLedgerEntries={supplierLedgerEntries}
               orders={orders}
@@ -1699,7 +2048,7 @@ function MillDashboardShell() {
             />
           )}
 
-          {activeSection === 'ledger' && (
+          {activeSection === 'ledger' && allowCashflow && (
             <LedgerBookView
               entries={ledgerEntries}
               clientsById={clientsById}
@@ -1709,6 +2058,15 @@ function MillDashboardShell() {
                 handleOpenPrintForLedgerEntry(entry, 'invoice')
               }
               onCorrectLedgerEntry={handleOpenCorrectClientLedger}
+            />
+          )}
+
+          {activeSection === 'users' && isAdmin && (
+            <UserManagementView
+              users={registeredUsers}
+              currentUserUid={user.uid}
+              isLoading={isDataLoading}
+              onRoleUpdated={(message) => setToast({ message })}
             />
           )}
         </main>
@@ -1723,7 +2081,7 @@ function MillDashboardShell() {
           setClientDrawerOpen(false);
           setEditingClient(null);
         }}
-        onDeleteClient={handleRequestDeleteClient}
+        onDeleteClient={isAdmin ? handleRequestDeleteClient : undefined}
         onSuccess={(message) => setToast({ message })}
       />
 
@@ -1734,13 +2092,19 @@ function MillDashboardShell() {
         entries={ledgerEntries}
         moneyInRecords={moneyInRecords}
         initialTab={ledgerDrawerTab}
+        isAdmin={isAdmin}
+        canManagePayments={canPay}
+        canAdjustLedgers={canAdjust}
         onClose={() => setSelectedLedgerClientId(null)}
         onEditClient={(client) => {
+          if (!isAdmin) return;
           setEditingClient(client);
           setClientDrawerOpen(true);
         }}
         onDeleteClient={handleRequestDeleteClient}
-        onReceivePayment={(client) => setReceivingPaymentClientId(client.id)}
+        onReceivePayment={(client) => {
+          if (canPay) setReceivingPaymentClientId(client.id);
+        }}
         onPrintInvoiceEntry={(entry) =>
           handleOpenPrintForLedgerEntry(entry, 'invoice')
         }
@@ -1811,7 +2175,7 @@ function MillDashboardShell() {
           setSupplierDrawerOpen(false);
           setEditingSupplier(null);
         }}
-        onDeleteSupplier={handleRequestDeleteSupplier}
+        onDeleteSupplier={isAdmin ? handleRequestDeleteSupplier : undefined}
         onSuccess={(message) => setToast({ message })}
       />
 
@@ -1822,17 +2186,25 @@ function MillDashboardShell() {
         purchases={purchases}
         moneyOutRecords={moneyOutRecords}
         initialTab={supplierDrawerTab}
+        isAdmin={isAdmin}
+        canManagePayments={canPay}
+        canAdjustLedgers={canAdjust}
         onClose={() => setSelectedSupplierId(null)}
         onEditSupplier={(supplier) => {
+          if (!isAdmin) return;
           setEditingSupplier(supplier);
           setSupplierDrawerOpen(true);
         }}
         onDeleteSupplier={handleRequestDeleteSupplier}
-        onPaySupplier={(supplier) => setPayingSupplierId(supplier.id)}
+        onPaySupplier={(supplier) => {
+          if (canPay) setPayingSupplierId(supplier.id);
+        }}
         onPrintStatement={(supplier) =>
           setStatementTarget({ kind: 'supplier', id: supplier.id })
         }
-        onEditPurchase={(purchase) => setEditingPurchase(purchase)}
+        onEditPurchase={(purchase) => {
+          if (isAdmin) setEditingPurchase(purchase);
+        }}
         onDeletePurchase={handleRequestDeletePurchase}
         onCorrectSupplierLedgerEntry={handleOpenCorrectSupplierLedger}
         onCorrectMoneyOut={handleOpenCorrectMoneyOut}
@@ -1863,6 +2235,7 @@ function MillDashboardShell() {
         employee={selectedEmployee}
         advances={employeeAdvances}
         moneyOutRecords={moneyOutRecords}
+        isAdmin={isAdmin}
         onClose={() => setSelectedEmployeeId(null)}
         onGiveAdvance={(employee) => setGivingAdvanceEmployeeId(employee.id)}
         onDeleteEmployee={handleRequestDeleteEmployee}
@@ -1952,7 +2325,9 @@ function MillDashboardShell() {
 export default function App() {
   return (
     <ErrorBoundary>
-      <MillDashboardShell />
+      <LanguageProvider>
+        <MillDashboardShell />
+      </LanguageProvider>
     </ErrorBoundary>
   );
 }

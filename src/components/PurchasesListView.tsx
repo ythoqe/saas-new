@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { doc, serverTimestamp, updateDoc } from 'firebase/firestore';
 import { CheckCircle2, Edit2, Lock, Package, Plus, Search, Trash2 } from 'lucide-react';
+import { useLanguage } from '../contexts/LanguageContext';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import {
   PURCHASE_UNITS,
@@ -22,6 +23,7 @@ interface PurchasesListViewProps {
   suppliersById: Map<string, SupplierRecord>;
   summariesBySupplierId: Map<string, SupplierWithLedgerSummary>;
   isLoading: boolean;
+  isAdmin: boolean;
   onCreateNewPurchase: () => void;
   onEditPurchase: (purchase: PurchaseRecord) => void;
   onDeletePurchase: (purchase: PurchaseRecord) => void;
@@ -34,12 +36,14 @@ export function PurchasesListView({
   suppliersById,
   summariesBySupplierId,
   isLoading,
+  isAdmin,
   onCreateNewPurchase,
   onEditPurchase,
   onDeletePurchase,
   onOpenSupplierLedger,
   onStatusUpdated,
 }: PurchasesListViewProps) {
+  const { t, translatePurchaseStatus } = useLanguage();
   const [searchQuery, setSearchQuery] = useState('');
   const [unitFilter, setUnitFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'Pending' | 'Paid'>('all');
@@ -120,42 +124,50 @@ export function PurchasesListView({
       {/* KPI Strip */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 bg-white border border-slate-200 rounded-lg divide-y sm:divide-y-0 sm:divide-x divide-slate-200">
         <div className="p-5">
-          <p className="text-xs font-medium text-slate-500">Total Purchases</p>
+          <p className="text-xs font-medium text-slate-500">
+            {t('purchases.kpi.totalPurchases')}
+          </p>
           <p className="mt-2 font-mono text-2xl font-semibold tabular-nums text-slate-900">
             {isLoading ? '—' : stats.totalCount}
           </p>
           <p className="mt-1 text-xs text-slate-500">
-            Posted atomically to supplier_ledger
+            {t('purchases.kpi.totalPurchasesSub')}
           </p>
         </div>
 
         <div className="p-5">
-          <p className="text-xs font-medium text-slate-500">Total Purchase Value</p>
+          <p className="text-xs font-medium text-slate-500">
+            {t('purchases.kpi.totalValue')}
+          </p>
           <p className="mt-2 font-mono text-2xl font-semibold tabular-nums text-slate-900">
             {isLoading ? '—' : formatCurrency(stats.totalSpend)}
           </p>
           <p className="mt-1 text-xs text-slate-500">
-            Chemicals, jute, dyes &amp; spare parts
+            {t('purchases.kpi.totalValueSub')}
           </p>
         </div>
 
         <div className="p-5">
-          <p className="text-xs font-medium text-slate-500">Distinct Items</p>
+          <p className="text-xs font-medium text-slate-500">
+            {t('purchases.kpi.distinctItems')}
+          </p>
           <p className="mt-2 font-mono text-2xl font-semibold tabular-nums text-slate-900">
             {isLoading ? '—' : stats.uniqueItemCount}
           </p>
           <p className="mt-1 text-xs text-slate-500">
-            Tracked inventory SKUs
+            {t('purchases.kpi.distinctItemsSub')}
           </p>
         </div>
 
         <div className="p-5">
-          <p className="text-xs font-medium text-slate-500">Billed Vendors</p>
+          <p className="text-xs font-medium text-slate-500">
+            {t('purchases.kpi.billedVendors')}
+          </p>
           <p className="mt-2 font-mono text-2xl font-semibold tabular-nums text-slate-900">
             {isLoading ? '—' : stats.activeSupplierCount}
           </p>
           <p className="mt-1 text-xs text-slate-500">
-            Suppliers with purchase history
+            {t('purchases.kpi.billedVendorsSub')}
           </p>
         </div>
       </div>
@@ -169,7 +181,7 @@ export function PurchasesListView({
               type="search"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search reference, item name, or supplier..."
+              placeholder={t('purchases.searchPlaceholder')}
               aria-label="Search purchases"
               className="w-full pl-9 pr-3.5 py-2 text-sm text-slate-900 bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:bg-white focus:border-[#1e3a8a] focus:ring-1 focus:ring-[#1e3a8a]"
             />
@@ -192,7 +204,9 @@ export function PurchasesListView({
                       : 'text-slate-600 hover:text-slate-900'
                   }`}
                 >
-                  {st === 'all' ? 'All Status' : st}
+                  {st === 'all'
+                    ? t('purchases.filter.allStatus')
+                    : translatePurchaseStatus(st)}
                 </button>
               ))}
             </div>
@@ -211,7 +225,7 @@ export function PurchasesListView({
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                All Units
+                {t('purchases.filter.allUnits')}
               </button>
               {PURCHASE_UNITS.map((u) => (
                 <button
@@ -246,12 +260,10 @@ export function PurchasesListView({
               <Package className="w-5 h-5" />
             </div>
             <h3 className="font-display text-base font-semibold text-slate-900">
-              No purchases logged yet
+              {t('purchases.empty.title')}
             </h3>
             <p className="text-sm text-slate-500 mt-1.5 max-w-md mx-auto">
-              Record jute, bleaching chemicals, dyes, or spare parts purchases to update
-              inventory records and automatically credit{' '}
-              <span className="font-mono text-slate-700">supplier_ledger</span>.
+              {t('purchases.empty.desc')}
             </p>
             <button
               type="button"
@@ -259,13 +271,13 @@ export function PurchasesListView({
               className="mt-5 inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-[#1e3a8a] hover:bg-[#1e40af] rounded-md transition-colors cursor-pointer whitespace-nowrap"
             >
               <Plus className="w-4 h-4" />
-              Log First Purchase
+              {t('purchases.empty.cta')}
             </button>
           </div>
         ) : sortedAndFiltered.length === 0 ? (
           <div className="py-14 px-6 text-center">
             <p className="text-sm font-medium text-slate-900">
-              No purchases match your filters
+              {t('purchases.empty.noMatch')}
             </p>
             <button
               type="button"
@@ -276,7 +288,7 @@ export function PurchasesListView({
               }}
               className="mt-4 px-3.5 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-md transition-colors cursor-pointer"
             >
-              Clear Filters
+              {t('common.clearFilters')}
             </button>
           </div>
         ) : (
@@ -284,14 +296,20 @@ export function PurchasesListView({
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="bg-slate-50/90 border-b border-slate-200 text-xs font-medium text-slate-600">
-                  <th className="py-3 px-5">Ref &amp; Date</th>
-                  <th className="py-3 px-4">Supplier</th>
-                  <th className="py-3 px-4">Item Name</th>
-                  <th className="py-3 px-4 text-right">Quantity</th>
-                  <th className="py-3 px-4 text-right">Rate</th>
-                  <th className="py-3 px-4 text-right">Total Amount</th>
-                  <th className="py-3 px-4">Status</th>
-                  <th className="py-3 px-5 text-right">Actions</th>
+                  <th className="py-3 px-5">{t('common.refAndDate')}</th>
+                  <th className="py-3 px-4">{t('purchases.table.supplier')}</th>
+                  <th className="py-3 px-4">{t('purchases.table.itemName')}</th>
+                  <th className="py-3 px-4 text-right">
+                    {t('purchases.table.quantity')}
+                  </th>
+                  <th className="py-3 px-4 text-right">
+                    {t('purchases.table.rate')}
+                  </th>
+                  <th className="py-3 px-4 text-right">
+                    {t('purchases.table.totalAmount')}
+                  </th>
+                  <th className="py-3 px-4">{t('common.status')}</th>
+                  <th className="py-3 px-5 text-right">{t('common.actions')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200 text-sm">
@@ -319,14 +337,14 @@ export function PurchasesListView({
                       </td>
                       <td className="py-3.5 px-4">
                         <p className="font-medium text-slate-900">
-                          {supplier ? supplier.supplierName : 'Supplier'}
+                          {supplier ? supplier.supplierName : t('common.supplier')}
                         </p>
                         <p className="text-xs text-slate-500 mt-0.5">
                           {supplier?.companyName}
                           {summary ? (
                             <>
                               {' '}
-                              · Payable:{' '}
+                              · {t('common.payable')}:{' '}
                               <span
                                 className={`font-mono tabular-nums ${
                                   summary.totalPayable > 0
@@ -363,7 +381,7 @@ export function PurchasesListView({
                               : 'text-emerald-800 bg-emerald-50 border-emerald-200'
                           }`}
                         >
-                          {isPending ? 'Pending' : 'Paid'}
+                          {translatePurchaseStatus(isPending ? 'Pending' : 'Paid')}
                         </span>
                       </td>
                       <td
@@ -379,41 +397,45 @@ export function PurchasesListView({
                               className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded transition-colors cursor-pointer whitespace-nowrap disabled:opacity-50"
                             >
                               <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
-                              Mark Paid
+                              {t('purchases.action.markPaid')}
                             </button>
                           )}
-                          <button
-                            type="button"
-                            disabled={!isPending}
-                            onClick={() => onEditPurchase(p)}
-                            aria-label={`Edit purchase ${p.reference}`}
-                            title={
-                              isPending
-                                ? 'Edit Purchase'
-                                : 'Paid purchases are locked and cannot be edited'
-                            }
-                            className="p-1.5 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded-md transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-                          >
-                            {isPending ? (
-                              <Edit2 className="w-3.5 h-3.5" />
-                            ) : (
-                              <Lock className="w-3.5 h-3.5" />
-                            )}
-                          </button>
-                          <button
-                            type="button"
-                            disabled={!isPending}
-                            onClick={() => onDeletePurchase(p)}
-                            aria-label={`Delete purchase ${p.reference}`}
-                            title={
-                              isPending
-                                ? 'Delete Purchase'
-                                : 'Paid purchases are locked and cannot be deleted'
-                            }
-                            className="p-1.5 text-slate-500 hover:text-red-700 hover:bg-red-50 rounded-md transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                          {isAdmin && (
+                            <>
+                              <button
+                                type="button"
+                                disabled={!isPending}
+                                onClick={() => onEditPurchase(p)}
+                                aria-label={`Edit purchase ${p.reference}`}
+                                title={
+                                  isPending
+                                    ? 'Edit Purchase'
+                                    : 'Paid purchases are locked and cannot be edited'
+                                }
+                                className="p-1.5 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded-md transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                              >
+                                {isPending ? (
+                                  <Edit2 className="w-3.5 h-3.5" />
+                                ) : (
+                                  <Lock className="w-3.5 h-3.5" />
+                                )}
+                              </button>
+                              <button
+                                type="button"
+                                disabled={!isPending}
+                                onClick={() => onDeletePurchase(p)}
+                                aria-label={`Delete purchase ${p.reference}`}
+                                title={
+                                  isPending
+                                    ? 'Delete Purchase'
+                                    : 'Paid purchases are locked and cannot be deleted'
+                                }
+                                className="p-1.5 text-slate-500 hover:text-red-700 hover:bg-red-50 rounded-md transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </>
+                          )}
                         </div>
                       </td>
                     </tr>

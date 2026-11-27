@@ -46,6 +46,7 @@ interface EmployeesViewProps {
   advances: EmployeeAdvanceRecord[];
   moneyOutRecords: MoneyOutRecord[];
   isLoading: boolean;
+  isAdmin: boolean;
   focusFormSignal: number;
   onEmployeeCreated: (employeeName: string, department: string) => void;
   onEmployeeUpdated: (message: string) => void;
@@ -86,6 +87,7 @@ export function EmployeesView({
   advances,
   moneyOutRecords,
   isLoading,
+  isAdmin,
   focusFormSignal,
   onEmployeeCreated,
   onEmployeeUpdated,
@@ -126,6 +128,7 @@ export function EmployeesView({
   const nameInputRef = useRef<HTMLInputElement | null>(null);
 
   const startEditEmployee = (emp: EmployeeRecord) => {
+    if (!isAdmin) return;
     setEditingEmployee(emp);
     setName(emp.name);
     setMobile(emp.mobile);
@@ -701,7 +704,7 @@ export function EmployeesView({
               </button>
 
               {editingEmployee && (
-                <div className="grid grid-cols-2 gap-2">
+                <div className={isAdmin ? 'grid grid-cols-2 gap-2' : ''}>
                   <button
                     type="button"
                     onClick={cancelEditEmployee}
@@ -710,19 +713,21 @@ export function EmployeesView({
                   >
                     Cancel Edit
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const target = editingEmployee;
-                      cancelEditEmployee();
-                      onDeleteEmployee(target);
-                    }}
-                    disabled={isSubmitting}
-                    className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium text-red-700 bg-red-50 border border-red-200 hover:bg-red-100 rounded-md transition-colors cursor-pointer"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                    Delete Employee
-                  </button>
+                  {isAdmin && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const target = editingEmployee;
+                        cancelEditEmployee();
+                        onDeleteEmployee(target);
+                      }}
+                      disabled={isSubmitting}
+                      className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium text-red-700 bg-red-50 border border-red-200 hover:bg-red-100 rounded-md transition-colors cursor-pointer"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      Delete Employee
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -950,24 +955,28 @@ export function EmployeesView({
                                 >
                                   Profile
                                 </button>
-                                <button
-                                  type="button"
-                                  onClick={() => startEditEmployee(emp)}
-                                  title="Edit Employee"
-                                  aria-label={`Edit ${emp.name}`}
-                                  className="p-1.5 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded-md transition-colors cursor-pointer"
-                                >
-                                  <Edit2 className="w-3.5 h-3.5" />
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => onDeleteEmployee(emp)}
-                                  title="Delete Employee"
-                                  aria-label={`Delete ${emp.name}`}
-                                  className="p-1.5 text-slate-500 hover:text-red-700 hover:bg-red-50 rounded-md transition-colors cursor-pointer"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
+                                {isAdmin && (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={() => startEditEmployee(emp)}
+                                      title="Edit Employee"
+                                      aria-label={`Edit ${emp.name}`}
+                                      className="p-1.5 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded-md transition-colors cursor-pointer"
+                                    >
+                                      <Edit2 className="w-3.5 h-3.5" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => onDeleteEmployee(emp)}
+                                      title="Delete Employee"
+                                      aria-label={`Delete ${emp.name}`}
+                                      className="p-1.5 text-slate-500 hover:text-red-700 hover:bg-red-50 rounded-md transition-colors cursor-pointer"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </>
+                                )}
                               </div>
                             </td>
                           </tr>

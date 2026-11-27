@@ -12,6 +12,7 @@ import {
   Trash2,
   Truck,
 } from 'lucide-react';
+import { useLanguage } from '../contexts/LanguageContext';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import {
   FABRIC_TYPES,
@@ -37,6 +38,7 @@ interface OrdersListViewProps {
   clientsById: Map<string, ClientRecord>;
   summariesByClientId: Map<string, ClientWithLedgerSummary>;
   isLoading: boolean;
+  isAdmin: boolean;
   onCreateNewOrder: () => void;
   onEditOrder: (order: OrderRecord) => void;
   onDeleteOrder: (order: OrderRecord) => void;
@@ -52,6 +54,7 @@ export function OrdersListView({
   clientsById,
   summariesByClientId,
   isLoading,
+  isAdmin,
   onCreateNewOrder,
   onEditOrder,
   onDeleteOrder,
@@ -61,6 +64,7 @@ export function OrdersListView({
   onPrintChallan,
   onStatusUpdated,
 }: OrdersListViewProps) {
+  const { t, translateOrderStatus } = useLanguage();
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [fabricFilter, setFabricFilter] = useState<string>('all');
@@ -143,42 +147,50 @@ export function OrdersListView({
       {/* KPI Strip */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 bg-white border border-slate-200 rounded-lg divide-y sm:divide-y-0 sm:divide-x divide-slate-200">
         <div className="p-5">
-          <p className="text-xs font-medium text-slate-500">Total Orders</p>
+          <p className="text-xs font-medium text-slate-500">
+            {t('orders.kpi.totalOrders')}
+          </p>
           <p className="mt-2 font-mono text-2xl font-semibold tabular-nums text-slate-900">
             {isLoading ? '—' : stats.totalOrders}
           </p>
           <p className="mt-1 text-xs text-slate-500">
-            All mill production records
+            {t('orders.kpi.totalOrdersSub')}
           </p>
         </div>
 
         <div className="p-5">
-          <p className="text-xs font-medium text-slate-500">In Progress</p>
+          <p className="text-xs font-medium text-slate-500">
+            {t('orders.kpi.inProgress')}
+          </p>
           <p className="mt-2 font-mono text-2xl font-semibold tabular-nums text-amber-700">
             {isLoading ? '—' : stats.inProgressCount}
           </p>
           <p className="mt-1 text-xs text-slate-500 font-mono tabular-nums">
-            {formatNumber(stats.activeGreyGaj)} Grey Gaj on floor
+            {formatNumber(stats.activeGreyGaj)} {t('orders.kpi.greyGajOnFloor')}
           </p>
         </div>
 
         <div className="p-5">
-          <p className="text-xs font-medium text-slate-500">Delivered Orders</p>
+          <p className="text-xs font-medium text-slate-500">
+            {t('orders.kpi.deliveredOrders')}
+          </p>
           <p className="mt-2 font-mono text-2xl font-semibold tabular-nums text-emerald-700">
             {isLoading ? '—' : stats.deliveredCount}
           </p>
           <p className="mt-1 text-xs text-slate-500">
-            Auto-billed to client_ledger
+            {t('orders.kpi.deliveredSub')}
           </p>
         </div>
 
         <div className="p-5">
-          <p className="text-xs font-medium text-slate-500">Total Delivered Billing</p>
+          <p className="text-xs font-medium text-slate-500">
+            {t('orders.kpi.totalBilling')}
+          </p>
           <p className="mt-2 font-mono text-2xl font-semibold tabular-nums text-slate-900">
             {isLoading ? '—' : formatCurrency(stats.totalDeliveredBilling)}
           </p>
           <p className="mt-1 text-xs text-slate-500">
-            Sum of Final_Gaj × Rate
+            {t('orders.kpi.billingSub')}
           </p>
         </div>
       </div>
@@ -193,7 +205,7 @@ export function OrdersListView({
               type="search"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search order ID, client, company, or fabric..."
+              placeholder={t('orders.searchPlaceholder')}
               aria-label="Search orders"
               className="w-full pl-9 pr-3.5 py-2 text-sm text-slate-900 bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:bg-white focus:border-[#1e3a8a] focus:ring-1 focus:ring-[#1e3a8a]"
             />
@@ -208,9 +220,9 @@ export function OrdersListView({
             >
               {(
                 [
-                  { id: 'all', label: 'All' },
-                  { id: 'in_progress', label: 'In Progress' },
-                  { id: 'delivered', label: 'Delivered' },
+                  { id: 'all', label: t('common.all') },
+                  { id: 'in_progress', label: t('orders.filter.inProgress') },
+                  { id: 'delivered', label: t('orders.filter.delivered') },
                 ] as const
               ).map((tab) => (
                 <button
@@ -235,7 +247,7 @@ export function OrdersListView({
               onChange={(e) => setFabricFilter(e.target.value)}
               className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-200 rounded-md focus:outline-none focus:border-[#1e3a8a] cursor-pointer"
             >
-              <option value="all">All Fabrics</option>
+              <option value="all">{t('orders.filter.allFabrics')}</option>
               {FABRIC_TYPES.map((fabric) => (
                 <option key={fabric} value={fabric}>
                   {fabric}
@@ -267,12 +279,10 @@ export function OrdersListView({
               <ClipboardList className="w-5 h-5" />
             </div>
             <h3 className="font-display text-base font-semibold text-slate-900">
-              No dyeing or washing orders yet
+              {t('orders.empty.title')}
             </h3>
             <p className="text-sm text-slate-500 mt-1.5 max-w-md mx-auto">
-              Create your first production order with grey fabric Than, Gaj, and rate.
-              When finished, click Complete &amp; Deliver to calculate Final Gaj billing
-              and post automatically to client_ledger.
+              {t('orders.empty.desc')}
             </p>
             <button
               type="button"
@@ -280,13 +290,13 @@ export function OrdersListView({
               className="mt-5 inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-[#1e3a8a] hover:bg-[#1e40af] rounded-md transition-colors cursor-pointer whitespace-nowrap"
             >
               <Plus className="w-4 h-4" />
-              Create First Order
+              {t('orders.empty.cta')}
             </button>
           </div>
         ) : sortedAndFiltered.length === 0 ? (
           <div className="py-14 px-6 text-center">
             <p className="text-sm font-medium text-slate-900">
-              No orders match your current filters
+              {t('orders.empty.noMatch')}
             </p>
             <button
               type="button"
@@ -297,7 +307,7 @@ export function OrdersListView({
               }}
               className="mt-4 px-3.5 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-md transition-colors cursor-pointer"
             >
-              Clear Filters
+              {t('common.clearFilters')}
             </button>
           </div>
         ) : (
@@ -305,14 +315,20 @@ export function OrdersListView({
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="bg-slate-50/90 border-b border-slate-200 text-xs font-medium text-slate-600">
-                  <th className="py-3 px-5">Order ID &amp; Date</th>
-                  <th className="py-3 px-4">Client</th>
-                  <th className="py-3 px-4">Fabric Type</th>
-                  <th className="py-3 px-4 text-right">Grey Intake</th>
-                  <th className="py-3 px-4 text-right">Final Gaj</th>
-                  <th className="py-3 px-4 text-right">Rate &amp; Bill</th>
-                  <th className="py-3 px-4">Status</th>
-                  <th className="py-3 px-5 text-right">Action</th>
+                  <th className="py-3 px-5">{t('orders.table.orderIdDate')}</th>
+                  <th className="py-3 px-4">{t('orders.table.client')}</th>
+                  <th className="py-3 px-4">{t('orders.table.fabricType')}</th>
+                  <th className="py-3 px-4 text-right">
+                    {t('orders.table.greyIntake')}
+                  </th>
+                  <th className="py-3 px-4 text-right">
+                    {t('orders.table.finalGaj')}
+                  </th>
+                  <th className="py-3 px-4 text-right">
+                    {t('orders.table.rateBill')}
+                  </th>
+                  <th className="py-3 px-4">{t('common.status')}</th>
+                  <th className="py-3 px-5 text-right">{t('common.action')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200 text-sm">
@@ -355,7 +371,7 @@ export function OrdersListView({
                               {clientSummary ? (
                                 <>
                                   {' '}
-                                  · Due:{' '}
+                                  · {t('common.due')}:{' '}
                                   <span
                                     className={`font-mono tabular-nums ${
                                       clientSummary.currentDue > 0
@@ -370,7 +386,9 @@ export function OrdersListView({
                             </p>
                           </button>
                         ) : (
-                          <span className="text-xs text-slate-500">Client</span>
+                          <span className="text-xs text-slate-500">
+                            {t('common.client')}
+                          </span>
                         )}
                       </td>
 
@@ -382,10 +400,10 @@ export function OrdersListView({
 
                       <td className="py-3.5 px-4 text-right font-mono text-xs tabular-nums whitespace-nowrap">
                         <p className="text-slate-900 font-medium">
-                          {formatNumber(order.greyFabricGaj)} Gaj
+                          {formatNumber(order.greyFabricGaj)} {t('common.gaj')}
                         </p>
                         <p className="text-slate-500 mt-0.5">
-                          {formatNumber(order.greyFabricThan)} Than
+                          {formatNumber(order.greyFabricThan)} {t('common.than')}
                         </p>
                       </td>
 
@@ -393,7 +411,7 @@ export function OrdersListView({
                         {order.finalGaj !== null ? (
                           <>
                             <p className="text-slate-900 font-semibold">
-                              {formatNumber(order.finalGaj)} Gaj
+                              {formatNumber(order.finalGaj)} {t('common.gaj')}
                             </p>
                             {variance !== null && (
                               <p
@@ -406,12 +424,14 @@ export function OrdersListView({
                                 }`}
                               >
                                 {variance > 0 ? '+' : ''}
-                                {formatNumber(variance)} Gaj
+                                {formatNumber(variance)} {t('common.gaj')}
                               </p>
                             )}
                           </>
                         ) : (
-                          <span className="text-slate-400">Pending</span>
+                          <span className="text-slate-400">
+                            {t('common.pending')}
+                          </span>
                         )}
                       </td>
 
@@ -422,7 +442,8 @@ export function OrdersListView({
                               {formatCurrency(order.finalBillAmount)}
                             </p>
                             <p className="text-[11px] text-slate-500 mt-0.5">
-                              @ {formatCurrency(order.rate)}/gaj · Billed
+                              @ {formatCurrency(order.rate)}/{t('common.gaj')} ·{' '}
+                              {t('orders.billed')}
                             </p>
                           </>
                         ) : (
@@ -431,7 +452,8 @@ export function OrdersListView({
                               {formatCurrency(estBill)}
                             </p>
                             <p className="text-[11px] text-slate-500 mt-0.5">
-                              @ {formatCurrency(order.rate)}/gaj · Est.
+                              @ {formatCurrency(order.rate)}/{t('common.gaj')} ·{' '}
+                              {t('orders.est')}
                             </p>
                           </>
                         )}
@@ -441,10 +463,10 @@ export function OrdersListView({
                         {isDelivered ? (
                           <div>
                             <p className="text-xs font-semibold text-emerald-700">
-                              Delivered
+                              {translateOrderStatus('Delivered')}
                             </p>
                             <p className="text-[11px] text-slate-500 mt-0.5">
-                              Invoice posted
+                              {t('orders.invoicePosted')}
                             </p>
                           </div>
                         ) : (
@@ -462,7 +484,7 @@ export function OrdersListView({
                           >
                             {IN_PROGRESS_ORDER_STATUSES.map((stage) => (
                               <option key={stage} value={stage}>
-                                {stage}
+                                {translateOrderStatus(stage)}
                               </option>
                             ))}
                           </select>
@@ -479,26 +501,26 @@ export function OrdersListView({
                                 className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-white bg-[#1e3a8a] hover:bg-[#1e40af] rounded-md transition-colors cursor-pointer whitespace-nowrap"
                               >
                                 <Printer className="w-3.5 h-3.5 shrink-0" />
-                                Print Invoice
+                                {t('common.printInvoice')}
                               </button>
                               <button
                                 type="button"
                                 onClick={() => onPrintChallan(order)}
-                                title="Print Delivery Challan (without prices)"
+                                title={t('common.challan')}
                                 className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-md transition-colors cursor-pointer whitespace-nowrap"
                               >
                                 <Truck className="w-3.5 h-3.5 shrink-0 text-slate-500" />
-                                Challan
+                                {t('common.challan')}
                               </button>
                               {client ? (
                                 <button
                                   type="button"
                                   onClick={() => onOpenClientLedger(client)}
-                                  title="Open client ledger"
+                                  title={t('common.ledger')}
                                   className="inline-flex items-center gap-1 px-2 py-1.5 text-xs font-medium text-[#1e3a8a] bg-blue-50/70 hover:bg-blue-100/80 rounded-md transition-colors cursor-pointer whitespace-nowrap"
                                 >
                                   <BookOpen className="w-3.5 h-3.5" />
-                                  Ledger
+                                  {t('common.ledger')}
                                 </button>
                               ) : null}
                             </>
@@ -509,43 +531,47 @@ export function OrdersListView({
                               className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-emerald-700 hover:bg-emerald-800 rounded-md transition-colors cursor-pointer whitespace-nowrap"
                             >
                               <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
-                              Complete &amp; Deliver
+                              {t('orders.completeDeliver')}
                             </button>
                           )}
 
-                          {/* Edit & Delete — Enabled ONLY when order.status === 'Processing' */}
-                          <button
-                            type="button"
-                            disabled={order.status !== 'Processing'}
-                            onClick={() => onEditOrder(order)}
-                            aria-label={`Edit order ${order.id}`}
-                            title={
-                              order.status === 'Processing'
-                                ? 'Edit Order'
-                                : 'Only orders in "Processing" status can be edited'
-                            }
-                            className="p-1.5 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded-md transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-                          >
-                            {order.status === 'Processing' ? (
-                              <Edit2 className="w-3.5 h-3.5" />
-                            ) : (
-                              <Lock className="w-3.5 h-3.5" />
-                            )}
-                          </button>
-                          <button
-                            type="button"
-                            disabled={order.status !== 'Processing'}
-                            onClick={() => onDeleteOrder(order)}
-                            aria-label={`Delete order ${order.id}`}
-                            title={
-                              order.status === 'Processing'
-                                ? 'Delete Order'
-                                : 'Only orders in "Processing" status can be deleted'
-                            }
-                            className="p-1.5 text-slate-500 hover:text-red-700 hover:bg-red-50 rounded-md transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                          {/* Edit & Delete — Visible ONLY to Admin, enabled ONLY when order.status === 'Processing' */}
+                          {isAdmin && (
+                            <>
+                              <button
+                                type="button"
+                                disabled={order.status !== 'Processing'}
+                                onClick={() => onEditOrder(order)}
+                                aria-label={`Edit order ${order.id}`}
+                                title={
+                                  order.status === 'Processing'
+                                    ? 'Edit Order'
+                                    : 'Only orders in "Processing" status can be edited'
+                                }
+                                className="p-1.5 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded-md transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                              >
+                                {order.status === 'Processing' ? (
+                                  <Edit2 className="w-3.5 h-3.5" />
+                                ) : (
+                                  <Lock className="w-3.5 h-3.5" />
+                                )}
+                              </button>
+                              <button
+                                type="button"
+                                disabled={order.status !== 'Processing'}
+                                onClick={() => onDeleteOrder(order)}
+                                aria-label={`Delete order ${order.id}`}
+                                title={
+                                  order.status === 'Processing'
+                                    ? 'Delete Order'
+                                    : 'Only orders in "Processing" status can be deleted'
+                                }
+                                className="p-1.5 text-slate-500 hover:text-red-700 hover:bg-red-50 rounded-md transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </>
+                          )}
                         </div>
                       </td>
                     </tr>
