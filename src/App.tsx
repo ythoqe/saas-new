@@ -13,6 +13,7 @@ import {
 import {
   ArrowLeftRight,
   CheckCircle2,
+  FileCheck2,
   Globe,
   Menu,
   Plus,
@@ -30,6 +31,10 @@ import { AccountTransferModal } from './components/AccountTransferModal';
 import { AddClientDrawer } from './components/AddClientDrawer';
 import { AddSupplierDrawer } from './components/AddSupplierDrawer';
 import { AuthScreen } from './components/AuthScreen';
+import {
+  ChequeActionModal,
+  type ChequeActionTarget,
+} from './components/ChequeActionModal';
 import {
   ClientLedgerDrawer,
   type ClientDrawerTab,
@@ -65,6 +70,7 @@ import { OrdersListView } from './components/OrdersListView';
 import { PaySalaryModal } from './components/PaySalaryModal';
 import { PaySupplierModal } from './components/PaySupplierModal';
 import { PurchasesListView } from './components/PurchasesListView';
+import { ReceiveChequeModal } from './components/ReceiveChequeModal';
 import { ReceivePaymentModal } from './components/ReceivePaymentModal';
 import {
   ReportPrintModal,
@@ -84,6 +90,8 @@ import { SupplierManagementView } from './components/SupplierManagementView';
 import { UserManagementView } from './components/UserManagementView';
 import type {
   AdvancePaymentMethod,
+  ChequeRecord,
+  ChequeStatus,
   ClientLedgerEntry,
   ClientRecord,
   ClientWithLedgerSummary,
@@ -171,6 +179,7 @@ function MillDashboardShell() {
   const [salaryPayments, setSalaryPayments] = useState<SalaryPaymentRecord[]>(
     []
   );
+  const [cheques, setCheques] = useState<ChequeRecord[]>([]);
 
   const [clientsLoaded, setClientsLoaded] = useState(false);
   const [ledgerLoaded, setLedgerLoaded] = useState(false);
@@ -181,6 +190,7 @@ function MillDashboardShell() {
   const [purchasesLoaded, setPurchasesLoaded] = useState(false);
   const [moneyOutLoaded, setMoneyOutLoaded] = useState(false);
   const [expensesLoaded, setExpensesLoaded] = useState(false);
+  const [chequesLoaded, setChequesLoaded] = useState(false);
   const [inventoryLoaded, setInventoryLoaded] = useState(false);
   const [stockMovementsLoaded, setStockMovementsLoaded] = useState(false);
   const [employeesLoaded, setEmployeesLoaded] = useState(false);
@@ -240,10 +250,13 @@ function MillDashboardShell() {
     useState<ReportPrintPayload | null>(null);
   const [reportPrintSignal, setReportPrintSignal] = useState(0);
 
-  // Accounts / Finance transfer modal
+  // Accounts / Finance transfer & cheque modals
   const [transferModalOpen, setTransferModalOpen] = useState(false);
   const [transferFromAccount, setTransferFromAccount] =
     useState<PaymentMethod>('Cash');
+  const [receiveChequeModalOpen, setReceiveChequeModalOpen] = useState(false);
+  const [chequeActionTarget, setChequeActionTarget] =
+    useState<ChequeActionTarget | null>(null);
 
   // Correction, Edit/Delete, and Append-Only Reversal/Adjustment modals
   const [deleteTarget, setDeleteTarget] = useState<DeleteTargetConfig | null>(
@@ -283,7 +296,11 @@ function MillDashboardShell() {
         setEmployeeAdvances([]);
         setSalaryPayments([]);
         setSalaryPaymentsLoaded(false);
+        setCheques([]);
+        setChequesLoaded(false);
         setPayingSalaryEmployeeId(null);
+        setReceiveChequeModalOpen(false);
+        setChequeActionTarget(null);
         setClientsLoaded(false);
         setLedgerLoaded(false);
         setOrdersLoaded(false);
@@ -398,6 +415,7 @@ function MillDashboardShell() {
       unsubUserDoc = onSnapshot(
         userDocRef,
         (docSnap) => {
+          if (cancelled) return;
           if (docSnap.exists()) {
             const data = docSnap.data();
             const rawRole = String(data.role ?? 'manager');
@@ -421,6 +439,14 @@ function MillDashboardShell() {
           setUserProfileLoaded(true);
         },
         (error) => {
+          if (cancelled) return;
+          const msg = error instanceof Error ? error.message : String(error);
+          if (
+            (error instanceof Error && error.name === 'AbortError') ||
+            msg.includes('signal is aborted without reason')
+          ) {
+            return;
+          }
           try {
             handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
           } catch (wrappedError) {
@@ -442,7 +468,7 @@ function MillDashboardShell() {
         unsubUserDoc();
       }
     };
-  }, [authReady, user]);
+  }, [authReady, user?.uid]);
 
   // Derived RBAC Permissions
   const userRole: UserRole =
@@ -470,9 +496,18 @@ function MillDashboardShell() {
   useEffect(() => {
     if (!authReady || !user || !userProfileLoaded) return;
 
+    let disposed = false;
     const unsubscribers: Array<() => void> = [];
 
     const handleListenerError = (error: unknown, path: string) => {
+      if (disposed) return;
+      const msg = error instanceof Error ? error.message : String(error);
+      if (
+        (error instanceof Error && error.name === 'AbortError') ||
+        msg.includes('signal is aborted without reason')
+      ) {
+        return;
+      }
       try {
         handleFirestoreError(error, OperationType.LIST, path);
       } catch (wrappedError) {
@@ -737,11 +772,12 @@ function MillDashboardShell() {
       setStockMovementsLoaded(true);
     }
 
-    // 4. Cashflow & Expenses (Admin & Accountant ONLY)
+    // 4. Cashflow, Expenses & Cheques (Admin & Accountant ONLY)
     if (canViewCashflow(userRole)) {
       setMoneyInLoaded(false);
       setMoneyOutLoaded(false);
       setExpensesLoaded(false);
+      setChequesLoaded(false);
 
       unsubscribers.push(
         onSnapshot(
@@ -893,6 +929,46 @@ function MillDashboardShell() {
           (error) => handleListenerError(error, 'expenses')
         )
       );
+
+      unsubscribers.push(
+        onSnapshot(
+          collection(db, 'cheques'),
+          (snapshot) => {
+            setCheques(
+              snapshot.docs.map((docSnap) => {
+                const data = docSnap.data();
+                return {
+                  id: docSnap.id,
+                  ownerId: String(data.ownerId ?? ''),
+                  clientId: String(data.clientId ?? ''),
+                  clientName: String(data.clientName ?? ''),
+                  amount: Number(data.amount ?? 0),
+                  bankName: String(data.bankName ?? ''),
+                  chequeNo: String(data.chequeNo ?? ''),
+                  chequeDate: String(data.chequeDate ?? ''),
+                  status: (data.status as ChequeStatus) || 'Pending',
+                  note: String(data.note ?? ''),
+                  endorsedSupplierId: String(data.endorsedSupplierId ?? ''),
+                  endorsedSupplierName: String(data.endorsedSupplierName ?? ''),
+                  endorsedDate: String(data.endorsedDate ?? ''),
+                  clearedDate: String(data.clearedDate ?? ''),
+                  bouncedDate: String(data.bouncedDate ?? ''),
+                  bounceReason: String(data.bounceReason ?? ''),
+                  moneyInId: String(data.moneyInId ?? ''),
+                  clientLedgerEntryId: String(data.clientLedgerEntryId ?? ''),
+                  supplierLedgerEntryId: String(
+                    data.supplierLedgerEntryId ?? ''
+                  ),
+                  createdAt: data.createdAt ?? null,
+                  updatedAt: data.updatedAt ?? null,
+                };
+              })
+            );
+            setChequesLoaded(true);
+          },
+          (error) => handleListenerError(error, 'cheques')
+        )
+      );
     } else {
       setMoneyInRecords([]);
       setMoneyInLoaded(true);
@@ -900,6 +976,8 @@ function MillDashboardShell() {
       setMoneyOutLoaded(true);
       setExpenses([]);
       setExpensesLoaded(true);
+      setCheques([]);
+      setChequesLoaded(true);
     }
 
     // 5. Employees, Advances, Salary Payments & User Management (Admin ONLY)
@@ -1045,11 +1123,12 @@ function MillDashboardShell() {
     }
 
     return () => {
+      disposed = true;
       for (const unsub of unsubscribers) {
         unsub();
       }
     };
-  }, [authReady, user, userProfileLoaded, userRole]);
+  }, [authReady, user?.uid, userProfileLoaded, userRole]);
 
   // Auto-dismiss feedback toast
   useEffect(() => {
@@ -1296,6 +1375,7 @@ function MillDashboardShell() {
     !purchasesLoaded ||
     !moneyOutLoaded ||
     !expensesLoaded ||
+    !chequesLoaded ||
     !inventoryLoaded ||
     !stockMovementsLoaded ||
     !employeesLoaded ||
@@ -1909,17 +1989,27 @@ function MillDashboardShell() {
     }
     if (activeSection === 'accounts') {
       return (
-        <button
-          type="button"
-          onClick={() => {
-            setTransferFromAccount('Cash');
-            setTransferModalOpen(true);
-          }}
-          className="inline-flex items-center gap-2 px-3.5 sm:px-4 py-2 text-xs sm:text-sm font-medium text-white bg-[#1e3a8a] hover:bg-[#1e40af] rounded-md transition-colors cursor-pointer whitespace-nowrap shrink-0"
-        >
-          <ArrowLeftRight className="w-4 h-4 shrink-0" />
-          {t('cta.accountTransfer')}
-        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={() => setReceiveChequeModalOpen(true)}
+            className="inline-flex items-center gap-1.5 px-3 sm:px-3.5 py-2 text-xs sm:text-sm font-medium text-[#1e3a8a] bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-md transition-colors cursor-pointer whitespace-nowrap shrink-0"
+          >
+            <FileCheck2 className="w-4 h-4 shrink-0" />
+            Receive Cheque
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setTransferFromAccount('Cash');
+              setTransferModalOpen(true);
+            }}
+            className="inline-flex items-center gap-2 px-3.5 sm:px-4 py-2 text-xs sm:text-sm font-medium text-white bg-[#1e3a8a] hover:bg-[#1e40af] rounded-md transition-colors cursor-pointer whitespace-nowrap shrink-0"
+          >
+            <ArrowLeftRight className="w-4 h-4 shrink-0" />
+            {t('cta.accountTransfer')}
+          </button>
+        </div>
       );
     }
     if (activeSection === 'reports') {
@@ -2228,6 +2318,7 @@ function MillDashboardShell() {
               ledgerEntries={ledgerEntries}
               supplierLedgerEntries={supplierLedgerEntries}
               orders={orders}
+              inventoryItems={inventoryItems}
               moneyInRecords={moneyInRecords}
               moneyOutRecords={moneyOutRecords}
               clientsById={clientsById}
@@ -2267,6 +2358,7 @@ function MillDashboardShell() {
             <AccountsView
               moneyInRecords={moneyInRecords}
               moneyOutRecords={moneyOutRecords}
+              cheques={cheques}
               clientsById={clientsById}
               suppliersById={suppliersById}
               employeesById={employeesById}
@@ -2276,6 +2368,10 @@ function MillDashboardShell() {
                 setTransferFromAccount(defaultFrom ?? 'Cash');
                 setTransferModalOpen(true);
               }}
+              onOpenReceiveCheque={() => setReceiveChequeModalOpen(true)}
+              onTriggerChequeAction={(cheque, action) =>
+                setChequeActionTarget({ cheque, action })
+              }
               onCorrectMoneyIn={handleOpenCorrectMoneyIn}
               onCorrectMoneyOut={handleOpenCorrectMoneyOut}
             />
@@ -2582,6 +2678,32 @@ function MillDashboardShell() {
           setToast({
             message: `Transferred ${formatCurrency(amount)} from ${fromAccount} to ${toAccount} (${transferRef}).`,
           });
+        }}
+      />
+
+      {/* Receive Client Cheque Modal (Records Pending cheque without altering Bank or Client Due) */}
+      <ReceiveChequeModal
+        open={receiveChequeModalOpen}
+        ownerId={user.uid}
+        clientSummaries={summaries}
+        onClose={() => setReceiveChequeModalOpen(false)}
+        onSuccess={(clientName, amount, chequeNo, chequeId) => {
+          setReceiveChequeModalOpen(false);
+          setToast({
+            message: `Recorded Pending cheque #${chequeNo} (${formatCurrency(amount)}) from ${clientName} [${chequeId}].`,
+          });
+        }}
+      />
+
+      {/* Cheque Lifecycle Action Modal (Self Clear, Endorse, Cleared by Supplier, Bounce) */}
+      <ChequeActionModal
+        target={chequeActionTarget}
+        ownerId={user.uid}
+        supplierSummaries={supplierSummaries}
+        onClose={() => setChequeActionTarget(null)}
+        onSuccess={(message) => {
+          setChequeActionTarget(null);
+          setToast({ message });
         }}
       />
       </div>

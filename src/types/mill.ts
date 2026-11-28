@@ -110,6 +110,15 @@ export type AdvancePaymentMethod = (typeof ADVANCE_PAYMENT_METHODS)[number];
 export const SALARY_PAYMENT_METHODS = ['Cash', 'Bank'] as const;
 export type SalaryPaymentMethod = (typeof SALARY_PAYMENT_METHODS)[number];
 
+export const CHEQUE_STATUSES = [
+  'Pending',
+  'Endorsed to Supplier',
+  'Cleared (Self)',
+  'Cleared (Supplier)',
+  'Bounced',
+] as const;
+export type ChequeStatus = (typeof CHEQUE_STATUSES)[number];
+
 export interface UserProfile {
   uid: string;
   email: string;
@@ -327,6 +336,30 @@ export interface SalaryPaymentRecord {
   createdAt: Timestamp | null;
 }
 
+export interface ChequeRecord {
+  id: string;
+  ownerId: string;
+  clientId: string;
+  clientName: string;
+  amount: number;
+  bankName: string;
+  chequeNo: string;
+  chequeDate: string;
+  status: ChequeStatus;
+  endorsedSupplierId: string | null;
+  endorsedSupplierName: string | null;
+  endorsedDate: string | null;
+  clearedDate: string | null;
+  bouncedDate: string | null;
+  bounceReason: string;
+  moneyInId: string | null;
+  clientLedgerEntryId: string | null;
+  supplierLedgerEntryId: string | null;
+  note: string;
+  createdAt: Timestamp | null;
+  updatedAt: Timestamp | null;
+}
+
 export interface ClientWithLedgerSummary {
   client: ClientRecord;
   totalDebit: number;
@@ -445,6 +478,17 @@ export const USER_VALIDATION = {
   displayNameMax: 120,
   emailMin: 3,
   emailMax: 254,
+} as const;
+
+export const CHEQUE_VALIDATION = {
+  bankNameMin: 1,
+  bankNameMax: 120,
+  chequeNoMin: 1,
+  chequeNoMax: 80,
+  maxAmount: 1000000000,
+  noteMax: 300,
+  bounceReasonMax: 300,
+  datePattern: /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/,
 } as const;
 
 

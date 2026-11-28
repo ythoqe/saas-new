@@ -1,11 +1,41 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider } from 'firebase/auth';
-import { doc, getDocFromServer, getFirestore } from 'firebase/firestore';
+import {
+  doc,
+  getDocFromServer,
+  initializeFirestore,
+  type FirestoreSettings,
+} from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
+
+if (typeof window !== 'undefined') {
+  window.addEventListener(
+    'unhandledrejection',
+    (event) => {
+      const reason = event.reason as { name?: string; message?: string } | null;
+      const name = reason?.name ?? '';
+      const message = reason?.message ?? String(reason ?? '');
+      if (
+        name === 'AbortError' ||
+        message.includes('signal is aborted without reason') ||
+        message.includes('Request was aborted')
+      ) {
+        event.preventDefault();
+      }
+    },
+    true
+  );
+}
 
 const app = initializeApp(firebaseConfig);
 
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+export const db = initializeFirestore(
+  app,
+  {
+    useFetchStreams: false,
+  } as FirestoreSettings,
+  firebaseConfig.firestoreDatabaseId
+);
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });

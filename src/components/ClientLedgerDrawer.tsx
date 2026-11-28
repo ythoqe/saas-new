@@ -1,6 +1,16 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
-import { Banknote, Edit2, Plus, Printer, RotateCcw, Trash2, X } from 'lucide-react';
+import {
+  Banknote,
+  Edit2,
+  MessageCircle,
+  Plus,
+  Printer,
+  RotateCcw,
+  Trash2,
+  X,
+} from 'lucide-react';
+import { useLanguage } from '../contexts/LanguageContext';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import {
   LEDGER_VALIDATION,
@@ -19,6 +29,10 @@ import {
   roundCurrency,
   timestampToDate,
 } from '../utils/ledger';
+import {
+  buildClientChatWhatsAppUrl,
+  buildPaymentWhatsAppUrl,
+} from '../utils/whatsapp';
 
 export type ClientDrawerTab = 'ledger' | 'payments';
 
@@ -61,6 +75,7 @@ export function ClientLedgerDrawer({
   onCorrectMoneyIn,
   onSuccess,
 }: ClientLedgerDrawerProps) {
+  const { lang } = useLanguage();
   const [activeTab, setActiveTab] = useState<ClientDrawerTab>(initialTab);
   const [showEntryForm, setShowEntryForm] = useState(false);
   const [txnType, setTxnType] = useState<Exclude<LedgerTxnType, 'opening'>>('invoice');
@@ -143,6 +158,12 @@ export function ClientLedgerDrawer({
   if (!client) return null;
 
   const dueStatus = getDueStatusLabel(totals.currentDue);
+  const clientChatWhatsAppUrl = buildClientChatWhatsAppUrl({
+    mobile: client.mobile,
+    clientName: client.clientName,
+    currentDue: totals.currentDue,
+    lang,
+  });
 
   const handleRecordEntry = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -239,7 +260,25 @@ export function ClientLedgerDrawer({
             <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-slate-500">
               <span className="font-medium text-slate-700">{client.companyName}</span>
               <span aria-hidden="true">·</span>
-              <span className="font-mono tabular-nums">{client.mobile}</span>
+              <span className="inline-flex items-center gap-1.5 font-mono tabular-nums">
+                <span>{client.mobile}</span>
+                {clientChatWhatsAppUrl && (
+                  <a
+                    href={clientChatWhatsAppUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title={
+                      lang === 'bn'
+                        ? `${client.clientName}-কে WhatsApp মেসেজ পাঠান`
+                        : `Chat with ${client.clientName} on WhatsApp`
+                    }
+                    aria-label={`Chat with ${client.clientName} on WhatsApp`}
+                    className="inline-flex items-center justify-center w-5 h-5 rounded bg-green-600 hover:bg-green-700 text-white transition-colors shrink-0"
+                  >
+                    <MessageCircle className="w-3 h-3" />
+                  </a>
+                )}
+              </span>
               <span aria-hidden="true">·</span>
               <span className="truncate max-w-md">{client.address}</span>
             </div>
@@ -651,6 +690,33 @@ export function ClientLedgerDrawer({
                                     Print Invoice
                                   </button>
                                 ) : null}
+                                {entry.txn_type === 'payment' && entry.credit > 0
+                                  ? (() => {
+                                      const paymentWaUrl = buildPaymentWhatsAppUrl({
+                                        mobile: client.mobile,
+                                        clientName: client.clientName,
+                                        paidAmount: entry.credit,
+                                        currentDue: totals.currentDue,
+                                        lang,
+                                      });
+                                      return paymentWaUrl ? (
+                                        <a
+                                          href={paymentWaUrl}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          title={
+                                            lang === 'bn'
+                                              ? 'WhatsApp-এ পেমেন্ট রসিদ পাঠান'
+                                              : 'Send Payment Receipt on WhatsApp'
+                                          }
+                                          className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-white bg-green-600 hover:bg-green-700 rounded transition-colors whitespace-nowrap shrink-0"
+                                        >
+                                          <MessageCircle className="w-3.5 h-3.5 shrink-0" />
+                                          WhatsApp
+                                        </a>
+                                      ) : null;
+                                    })()
+                                  : null}
                                 {canAdjustLedgers ? (
                                   <button
                                     type="button"
@@ -660,7 +726,8 @@ export function ClientLedgerDrawer({
                                     <RotateCcw className="w-3.5 h-3.5 shrink-0" />
                                     Correct / Adjust
                                   </button>
-                                ) : entry.txn_type !== 'invoice' ? (
+                                ) : entry.txn_type !== 'invoice' &&
+                                  !(entry.txn_type === 'payment' && entry.credit > 0 && clientChatWhatsAppUrl) ? (
                                   <span className="text-xs text-slate-400">—</span>
                                 ) : null}
                               </div>
@@ -711,50 +778,77 @@ export function ClientLedgerDrawer({
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-200 text-sm">
-                        {paymentHistoryRows.map((payment) => (
-                          <tr
-                            key={payment.id}
-                            className="hover:bg-slate-50/70 transition-colors"
-                          >
-                            <td className="py-3 px-4 font-mono text-xs font-semibold text-slate-900 whitespace-nowrap">
-                              {payment.reference}
-                            </td>
-                            <td className="py-3 px-4 font-mono text-xs tabular-nums text-slate-700 whitespace-nowrap">
-                              {payment.paymentDate
-                                ? formatIsoDate(payment.paymentDate)
-                                : formatDateTime(payment.createdAt)}
-                            </td>
-                            <td className="py-3 px-4 text-xs font-medium text-slate-800 whitespace-nowrap">
-                              {payment.paymentMethod ?? 'Payment'}
-                            </td>
-                            <td className="py-3 px-4 text-xs text-slate-600 break-words max-w-xs">
-                              {payment.note || '—'}
-                            </td>
-                            <td className="py-3 px-4 text-right font-mono text-xs font-semibold tabular-nums text-emerald-700 whitespace-nowrap">
-                              {formatCurrency(payment.amount)}
-                            </td>
-                            <td className="py-3 px-4 text-right whitespace-nowrap">
-                              {canAdjustLedgers ? (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    if (payment.moneyIn) {
-                                      onCorrectMoneyIn(payment.moneyIn);
-                                    } else {
-                                      onCorrectLedgerEntry(payment.entry);
-                                    }
-                                  }}
-                                  className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded transition-colors cursor-pointer whitespace-nowrap"
-                                >
-                                  <RotateCcw className="w-3.5 h-3.5 shrink-0" />
-                                  Correct / Adjust
-                                </button>
-                              ) : (
-                                <span className="text-xs text-slate-400">—</span>
-                              )}
-                            </td>
-                          </tr>
-                        ))}
+                        {paymentHistoryRows.map((payment) => {
+                          const paymentWaUrl = buildPaymentWhatsAppUrl({
+                            mobile: client.mobile,
+                            clientName: client.clientName,
+                            paidAmount: payment.amount,
+                            currentDue: totals.currentDue,
+                            lang,
+                          });
+                          return (
+                            <tr
+                              key={payment.id}
+                              className="hover:bg-slate-50/70 transition-colors"
+                            >
+                              <td className="py-3 px-4 font-mono text-xs font-semibold text-slate-900 whitespace-nowrap">
+                                {payment.reference}
+                              </td>
+                              <td className="py-3 px-4 font-mono text-xs tabular-nums text-slate-700 whitespace-nowrap">
+                                {payment.paymentDate
+                                  ? formatIsoDate(payment.paymentDate)
+                                  : formatDateTime(payment.createdAt)}
+                              </td>
+                              <td className="py-3 px-4 text-xs font-medium text-slate-800 whitespace-nowrap">
+                                {payment.paymentMethod ?? 'Payment'}
+                              </td>
+                              <td className="py-3 px-4 text-xs text-slate-600 break-words max-w-xs">
+                                {payment.note || '—'}
+                              </td>
+                              <td className="py-3 px-4 text-right font-mono text-xs font-semibold tabular-nums text-emerald-700 whitespace-nowrap">
+                                {formatCurrency(payment.amount)}
+                              </td>
+                              <td className="py-3 px-4 text-right whitespace-nowrap">
+                                <div className="inline-flex items-center justify-end gap-1.5">
+                                  {paymentWaUrl && (
+                                    <a
+                                      href={paymentWaUrl}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      title={
+                                        lang === 'bn'
+                                          ? 'WhatsApp-এ পেমেন্ট রসিদ পাঠান'
+                                          : 'Send Payment Receipt on WhatsApp'
+                                      }
+                                      className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-white bg-green-600 hover:bg-green-700 rounded transition-colors whitespace-nowrap shrink-0"
+                                    >
+                                      <MessageCircle className="w-3.5 h-3.5 shrink-0" />
+                                      WhatsApp
+                                    </a>
+                                  )}
+                                  {canAdjustLedgers ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        if (payment.moneyIn) {
+                                          onCorrectMoneyIn(payment.moneyIn);
+                                        } else {
+                                          onCorrectLedgerEntry(payment.entry);
+                                        }
+                                      }}
+                                      className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded transition-colors cursor-pointer whitespace-nowrap"
+                                    >
+                                      <RotateCcw className="w-3.5 h-3.5 shrink-0" />
+                                      Correct / Adjust
+                                    </button>
+                                  ) : !paymentWaUrl ? (
+                                    <span className="text-xs text-slate-400">—</span>
+                                  ) : null}
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>

@@ -6,6 +6,7 @@ import {
   ClipboardList,
   Edit2,
   Lock,
+  MessageCircle,
   Plus,
   Printer,
   Search,
@@ -30,6 +31,7 @@ import {
   roundCurrency,
   timestampToDate,
 } from '../utils/ledger';
+import { buildOrderWhatsAppUrl } from '../utils/whatsapp';
 
 type StatusFilter = 'all' | 'in_progress' | 'delivered';
 
@@ -64,7 +66,7 @@ export function OrdersListView({
   onPrintChallan,
   onStatusUpdated,
 }: OrdersListViewProps) {
-  const { t, translateOrderStatus } = useLanguage();
+  const { lang, t, translateOrderStatus } = useLanguage();
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [fabricFilter, setFabricFilter] = useState<string>('all');
@@ -495,6 +497,37 @@ export function OrdersListView({
                         <div className="inline-flex items-center justify-end gap-1.5">
                           {isDelivered ? (
                             <>
+                              {client
+                                ? (() => {
+                                    const orderWaUrl = buildOrderWhatsAppUrl({
+                                      mobile: client.mobile,
+                                      clientName: client.clientName,
+                                      orderId: order.id,
+                                      than: order.greyFabricThan,
+                                      greyGaj: order.greyFabricGaj,
+                                      finalGaj: order.finalGaj ?? order.greyFabricGaj,
+                                      totalBill: order.finalBillAmount ?? estBill,
+                                      lang,
+                                    });
+                                    return orderWaUrl ? (
+                                      <a
+                                        href={orderWaUrl}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        title={
+                                          lang === 'bn'
+                                            ? 'WhatsApp-এ অর্ডার বিল পাঠান'
+                                            : 'Send Order Update on WhatsApp'
+                                        }
+                                        aria-label={`Send WhatsApp update for order ${order.id}`}
+                                        className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-white bg-green-600 hover:bg-green-700 rounded-md transition-colors whitespace-nowrap shrink-0"
+                                      >
+                                        <MessageCircle className="w-3.5 h-3.5 shrink-0" />
+                                        WhatsApp
+                                      </a>
+                                    ) : null;
+                                  })()
+                                : null}
                               <button
                                 type="button"
                                 onClick={() => onPrintInvoice(order)}

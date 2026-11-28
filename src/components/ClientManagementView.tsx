@@ -4,6 +4,7 @@ import {
   Banknote,
   BookOpen,
   Edit2,
+  MessageCircle,
   Plus,
   Search,
   Trash2,
@@ -17,6 +18,7 @@ import {
   getDueStatusLabel,
   roundCurrency,
 } from '../utils/ledger';
+import { buildClientChatWhatsAppUrl } from '../utils/whatsapp';
 
 type DueFilter = 'all' | 'with_due' | 'settled';
 type SortOption = 'newest' | 'due_desc' | 'name_asc';
@@ -46,7 +48,7 @@ export function ClientManagementView({
   onOpenLedger,
   onReceivePayment,
 }: ClientManagementViewProps) {
-  const { t, translateDueTone } = useLanguage();
+  const { lang, t, translateDueTone } = useLanguage();
   const [searchQuery, setSearchQuery] = useState('');
   const [dueFilter, setDueFilter] = useState<DueFilter>('all');
   const [sortBy, setSortBy] = useState<SortOption>('newest');
@@ -301,6 +303,12 @@ export function ClientManagementView({
               <tbody className="divide-y divide-slate-200 text-sm">
                 {filteredSummaries.map((item) => {
                   const status = getDueStatusLabel(item.currentDue);
+                  const whatsappUrl = buildClientChatWhatsAppUrl({
+                    mobile: item.client.mobile,
+                    clientName: item.client.clientName,
+                    currentDue: item.currentDue,
+                    lang,
+                  });
                   return (
                     <tr
                       key={item.client.id}
@@ -322,7 +330,26 @@ export function ClientManagementView({
                         </div>
                       </td>
                       <td className="py-3.5 px-4 font-mono text-xs tabular-nums text-slate-700 whitespace-nowrap">
-                        {item.client.mobile}
+                        <div className="inline-flex items-center gap-2">
+                          <span>{item.client.mobile}</span>
+                          {whatsappUrl && (
+                            <a
+                              href={whatsappUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              title={
+                                lang === 'bn'
+                                  ? `${item.client.clientName}-কে WhatsApp মেসেজ পাঠান`
+                                  : `Chat with ${item.client.clientName} on WhatsApp`
+                              }
+                              aria-label={`Chat with ${item.client.clientName} on WhatsApp`}
+                              className="inline-flex items-center justify-center w-6 h-6 rounded-md bg-green-600 hover:bg-green-700 text-white transition-colors shrink-0"
+                            >
+                              <MessageCircle className="w-3.5 h-3.5" />
+                            </a>
+                          )}
+                        </div>
                       </td>
                       <td className="py-3.5 px-4 text-right font-mono text-xs tabular-nums text-slate-700 whitespace-nowrap hidden md:table-cell">
                         {formatCurrency(item.totalDebit)}

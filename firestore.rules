@@ -1190,6 +1190,93 @@ service cloud.firestore {
         && data.createdAt is timestamp;
     }
 
+    // Validation Blueprint: Cheque entity (State machine with atomic clearing)
+    function isValidCheque(data) {
+      return data.keys().hasAll([
+          'ownerId',
+          'clientId',
+          'clientName',
+          'amount',
+          'bankName',
+          'chequeNo',
+          'chequeDate',
+          'status',
+          'endorsedSupplierId',
+          'endorsedSupplierName',
+          'endorsedDate',
+          'clearedDate',
+          'bouncedDate',
+          'bounceReason',
+          'moneyInId',
+          'clientLedgerEntryId',
+          'supplierLedgerEntryId',
+          'note',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId',
+          'clientId',
+          'clientName',
+          'amount',
+          'bankName',
+          'chequeNo',
+          'chequeDate',
+          'status',
+          'endorsedSupplierId',
+          'endorsedSupplierName',
+          'endorsedDate',
+          'clearedDate',
+          'bouncedDate',
+          'bounceReason',
+          'moneyInId',
+          'clientLedgerEntryId',
+          'supplierLedgerEntryId',
+          'note',
+          'createdAt',
+          'updatedAt'
+        ])
+        && isValidId(data.ownerId)
+        && isValidId(data.clientId)
+        && data.clientName is string
+        && data.clientName.size() >= 1
+        && data.clientName.size() <= 120
+        && isPositiveBoundedNumber(data.amount, 1000000000)
+        && data.bankName is string
+        && data.bankName.size() >= 1
+        && data.bankName.size() <= 120
+        && data.chequeNo is string
+        && data.chequeNo.size() >= 1
+        && data.chequeNo.size() <= 80
+        && data.chequeDate is string
+        && data.chequeDate.size() == 10
+        && data.chequeDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && data.status is string
+        && data.status.size() >= 7
+        && data.status.size() <= 30
+        && data.status in [
+          'Pending',
+          'Endorsed to Supplier',
+          'Cleared (Self)',
+          'Cleared (Supplier)',
+          'Bounced'
+        ]
+        && (data.endorsedSupplierId == null || isValidId(data.endorsedSupplierId))
+        && (data.endorsedSupplierName == null || (data.endorsedSupplierName is string && data.endorsedSupplierName.size() >= 1 && data.endorsedSupplierName.size() <= 120))
+        && (data.endorsedDate == null || (data.endorsedDate is string && data.endorsedDate.size() == 10 && data.endorsedDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')))
+        && (data.clearedDate == null || (data.clearedDate is string && data.clearedDate.size() == 10 && data.clearedDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')))
+        && (data.bouncedDate == null || (data.bouncedDate is string && data.bouncedDate.size() == 10 && data.bouncedDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')))
+        && data.bounceReason is string
+        && data.bounceReason.size() <= 300
+        && (data.moneyInId == null || isValidId(data.moneyInId))
+        && (data.clientLedgerEntryId == null || isValidId(data.clientLedgerEntryId))
+        && (data.supplierLedgerEntryId == null || isValidId(data.supplierLedgerEntryId))
+        && data.note is string
+        && data.note.size() <= 300
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
     // Collection: /app_meta/{metaId} (First-User Admin Bootstrap Sentinel)
     match /app_meta/{metaId} {
       allow get: if isVerifiedUser()
@@ -1934,6 +2021,136 @@ service cloud.firestore {
         );
 
       allow update: if false;
+      allow delete: if false;
+    }
+
+    // Collection: /cheques/{chequeId} (Admin & Accountant ONLY — Strict Atomic State Machine)
+    match /cheques/{chequeId} {
+      allow get: if isVerifiedUser()
+        && isValidId(chequeId)
+        && isAdminOrAccountant();
+
+      allow list: if isAdminOrAccountant();
+
+      allow create: if isVerifiedUser()
+        && isValidId(chequeId)
+        && isValidCheque(incoming())
+        && incoming().ownerId == request.auth.uid
+        && incoming().status == 'Pending'
+        && incoming().endorsedSupplierId == null
+        && incoming().endorsedSupplierName == null
+        && incoming().endorsedDate == null
+        && incoming().clearedDate == null
+        && incoming().bouncedDate == null
+        && incoming().bounceReason == ''
+        && incoming().moneyInId == null
+        && incoming().clientLedgerEntryId == null
+        && incoming().supplierLedgerEntryId == null
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && isAdminOrAccountant()
+        && exists(/databases/$(database)/documents/clients/$(incoming().clientId));
+
+      allow update: if isVerifiedUser()
+        && isValidId(chequeId)
+        && isValidCheque(incoming())
+        && isAdminOrAccountant()
+        && incoming().ownerId == existing().ownerId
+        && incoming().clientId == existing().clientId
+        && incoming().clientName == existing().clientName
+        && incoming().amount == existing().amount
+        && incoming().bankName == existing().bankName
+        && incoming().chequeNo == existing().chequeNo
+        && incoming().chequeDate == existing().chequeDate
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          // Action 1: Self Clear (Deposit to Bank) — Atomically creates money_in (Bank) + client_ledger (credit)
+          (
+            existing().status == 'Pending'
+            && incoming().status == 'Cleared (Self)'
+            && incoming().clearedDate is string
+            && incoming().moneyInId is string
+            && incoming().clientLedgerEntryId == incoming().moneyInId
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'status',
+              'clearedDate',
+              'moneyInId',
+              'clientLedgerEntryId',
+              'note',
+              'updatedAt'
+            ])
+            && existsAfter(/databases/$(database)/documents/money_in/$(incoming().moneyInId))
+            && getAfter(/databases/$(database)/documents/money_in/$(incoming().moneyInId)).data.ownerId == request.auth.uid
+            && getAfter(/databases/$(database)/documents/money_in/$(incoming().moneyInId)).data.clientId == existing().clientId
+            && getAfter(/databases/$(database)/documents/money_in/$(incoming().moneyInId)).data.paymentMethod == 'Bank'
+            && getAfter(/databases/$(database)/documents/money_in/$(incoming().moneyInId)).data.amount == existing().amount
+            && getAfter(/databases/$(database)/documents/money_in/$(incoming().moneyInId)).data.paymentDate == incoming().clearedDate
+            && existsAfter(/databases/$(database)/documents/client_ledger/$(incoming().clientLedgerEntryId))
+            && getAfter(/databases/$(database)/documents/client_ledger/$(incoming().clientLedgerEntryId)).data.ownerId == request.auth.uid
+            && getAfter(/databases/$(database)/documents/client_ledger/$(incoming().clientLedgerEntryId)).data.clientId == existing().clientId
+            && getAfter(/databases/$(database)/documents/client_ledger/$(incoming().clientLedgerEntryId)).data.txn_type == 'payment'
+            && getAfter(/databases/$(database)/documents/client_ledger/$(incoming().clientLedgerEntryId)).data.debit == 0
+            && getAfter(/databases/$(database)/documents/client_ledger/$(incoming().clientLedgerEntryId)).data.credit == existing().amount
+          ) || (
+            // Action 2: Endorse to Supplier — Records supplier endorsement without altering ledgers yet
+            existing().status == 'Pending'
+            && incoming().status == 'Endorsed to Supplier'
+            && incoming().endorsedSupplierId is string
+            && incoming().endorsedSupplierName is string
+            && incoming().endorsedDate is string
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'status',
+              'endorsedSupplierId',
+              'endorsedSupplierName',
+              'endorsedDate',
+              'note',
+              'updatedAt'
+            ])
+            && exists(/databases/$(database)/documents/suppliers/$(incoming().endorsedSupplierId))
+          ) || (
+            // Action 3: Cleared by Supplier — Atomically reduces supplier payable (debit) & settles client due (credit)
+            existing().status == 'Endorsed to Supplier'
+            && existing().endorsedSupplierId is string
+            && incoming().status == 'Cleared (Supplier)'
+            && incoming().clearedDate is string
+            && incoming().supplierLedgerEntryId is string
+            && incoming().clientLedgerEntryId is string
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'status',
+              'clearedDate',
+              'supplierLedgerEntryId',
+              'clientLedgerEntryId',
+              'note',
+              'updatedAt'
+            ])
+            && existsAfter(/databases/$(database)/documents/supplier_ledger/$(incoming().supplierLedgerEntryId))
+            && getAfter(/databases/$(database)/documents/supplier_ledger/$(incoming().supplierLedgerEntryId)).data.ownerId == request.auth.uid
+            && getAfter(/databases/$(database)/documents/supplier_ledger/$(incoming().supplierLedgerEntryId)).data.supplierId == existing().endorsedSupplierId
+            && getAfter(/databases/$(database)/documents/supplier_ledger/$(incoming().supplierLedgerEntryId)).data.txn_type == 'payment'
+            && getAfter(/databases/$(database)/documents/supplier_ledger/$(incoming().supplierLedgerEntryId)).data.debit == existing().amount
+            && getAfter(/databases/$(database)/documents/supplier_ledger/$(incoming().supplierLedgerEntryId)).data.credit == 0
+            && existsAfter(/databases/$(database)/documents/client_ledger/$(incoming().clientLedgerEntryId))
+            && getAfter(/databases/$(database)/documents/client_ledger/$(incoming().clientLedgerEntryId)).data.ownerId == request.auth.uid
+            && getAfter(/databases/$(database)/documents/client_ledger/$(incoming().clientLedgerEntryId)).data.clientId == existing().clientId
+            && getAfter(/databases/$(database)/documents/client_ledger/$(incoming().clientLedgerEntryId)).data.txn_type == 'payment'
+            && getAfter(/databases/$(database)/documents/client_ledger/$(incoming().clientLedgerEntryId)).data.debit == 0
+            && getAfter(/databases/$(database)/documents/client_ledger/$(incoming().clientLedgerEntryId)).data.credit == existing().amount
+          ) || (
+            // Action 4: Mark as Bounced — Terminal failure state from Pending or Endorsed
+            existing().status in ['Pending', 'Endorsed to Supplier']
+            && incoming().status == 'Bounced'
+            && incoming().bouncedDate is string
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'status',
+              'bouncedDate',
+              'bounceReason',
+              'note',
+              'updatedAt'
+            ])
+          )
+        );
+
       allow delete: if false;
     }
   }

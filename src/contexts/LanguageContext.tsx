@@ -16,7 +16,7 @@ const STORAGE_KEY = 'indigomill_language';
 
 const en = {
   // Common & Global
-  'app.loading': 'Loading IndigoMill Ledger...',
+  'app.loading': 'Loading Mayer Doa washing...',
   'app.language': 'Language',
   'common.all': 'All',
   'common.actions': 'Actions',
@@ -197,6 +197,41 @@ const en = {
   'dashboard.txn.reversalOut': 'Reversal Out',
   'dashboard.inLabel': 'In',
   'dashboard.outLabel': 'Out',
+  'dashboard.chart.title': 'Revenue vs Expenses (Last 6 Months)',
+  'dashboard.chart.subtitle':
+    'Monthly client invoices billed compared against operating expenses & payouts',
+  'dashboard.chart.fullReport': 'Full P&L Report',
+  'dashboard.chart.revenue': 'Total Revenue',
+  'dashboard.chart.expenses': 'Total Expenses',
+  'dashboard.chart.sixMonthNet': '6-Month Net',
+  'dashboard.chart.emptyHint':
+    'Deliver client orders or record expenses to populate the 6-month trend.',
+  'dashboard.monthly.title': "This Month's Summary",
+  'dashboard.monthly.totalIncome': 'Total Income',
+  'dashboard.monthly.incomeSub': 'Client invoices billed',
+  'dashboard.monthly.totalExpense': 'Total Expense',
+  'dashboard.monthly.expenseSub': 'Supplier payouts, salaries & costs',
+  'dashboard.monthly.netProfit': 'Net Profit',
+  'dashboard.monthly.netLoss': 'Net Loss',
+  'dashboard.monthly.cashCollected': 'Cash Collected',
+  'dashboard.monthly.margin': 'margin',
+  'dashboard.monthly.viewReports': 'View Detailed Reports',
+  'dashboard.alerts.title': 'Important Alerts',
+  'dashboard.alerts.allClear': 'All clear — no urgent operational alerts',
+  'dashboard.alerts.lowStockTitle': 'Low Stock Warning',
+  'dashboard.alerts.lowStockCount': 'low stock',
+  'dashboard.alerts.manageInventory': 'Inventory',
+  'dashboard.alerts.minLabel': 'Min',
+  'dashboard.alerts.shortBy': 'Short',
+  'dashboard.alerts.restock': 'Restock',
+  'dashboard.alerts.lowStockEmpty':
+    'All inventory items are above their minimum stock threshold.',
+  'dashboard.alerts.pendingDeliveryTitle': 'Pending Delivery (Ready)',
+  'dashboard.alerts.readyCount': 'ready for delivery',
+  'dashboard.alerts.pendingDeliveryEmpty':
+    'No ready orders are currently waiting for delivery.',
+  'dashboard.alerts.inProgressNote': 'orders currently in processing/dyeing/washing',
+  'dashboard.alerts.viewMore': 'more in module',
 
   // Clients Module
   'clients.kpi.totalClients': 'Total Clients',
@@ -542,7 +577,7 @@ export type TranslationKey = keyof typeof en;
 
 const bn: Record<TranslationKey, string> = {
   // Common & Global
-  'app.loading': 'IndigoMill Ledger লোড হচ্ছে...',
+  'app.loading': 'মায়ের দোয়া ওয়াশিং এন্ড প্রসেসিং মিলস্ লোড হচ্ছে...',
   'app.language': 'ভাষা',
   'common.all': 'সবগুলো',
   'common.actions': 'অ্যাকশন',
@@ -723,6 +758,41 @@ const bn: Record<TranslationKey, string> = {
   'dashboard.txn.reversalOut': 'সমন্বয় পরিশোধ',
   'dashboard.inLabel': 'জমা',
   'dashboard.outLabel': 'খরচ/প্রদান',
+  'dashboard.chart.title': 'আয় বনাম ব্যয় (সর্বশেষ ৬ মাস)',
+  'dashboard.chart.subtitle':
+    'মাসিক ক্লায়েন্ট বিল (আয়) এবং কারখানার মোট খরচ ও পরিশোধের তুলনা',
+  'dashboard.chart.fullReport': 'সম্পূর্ণ লাভ-ক্ষতি রিপোর্ট',
+  'dashboard.chart.revenue': 'মোট আয়',
+  'dashboard.chart.expenses': 'মোট ব্যয়',
+  'dashboard.chart.sixMonthNet': '৬ মাসের নিট',
+  'dashboard.chart.emptyHint':
+    '৬ মাসের গ্রাফ দেখতে অর্ডার ডেলিভারি করুন বা খরচ এন্ট্রি দিন।',
+  'dashboard.monthly.title': 'চলতি মাসের সারসংক্ষেপ',
+  'dashboard.monthly.totalIncome': 'মোট আয়',
+  'dashboard.monthly.incomeSub': 'ক্লায়েন্ট ইনভয়েস বিল',
+  'dashboard.monthly.totalExpense': 'মোট ব্যয়',
+  'dashboard.monthly.expenseSub': 'সাপ্লায়ার পেমেন্ট, বেতন ও খরচ',
+  'dashboard.monthly.netProfit': 'নিট লাভ',
+  'dashboard.monthly.netLoss': 'নিট ক্ষতি',
+  'dashboard.monthly.cashCollected': 'নগদ আদায়',
+  'dashboard.monthly.margin': 'মার্জিন',
+  'dashboard.monthly.viewReports': 'বিস্তারিত রিপোর্ট দেখুন',
+  'dashboard.alerts.title': 'গুরুত্বপূর্ণ সতর্কতা',
+  'dashboard.alerts.allClear': 'সব ঠিক আছে — কোনো জরুরি সতর্কতা নেই',
+  'dashboard.alerts.lowStockTitle': 'কম স্টক সতর্কতা',
+  'dashboard.alerts.lowStockCount': 'টি কম স্টক',
+  'dashboard.alerts.manageInventory': 'স্টক দেখুন',
+  'dashboard.alerts.minLabel': 'ন্যূনতম',
+  'dashboard.alerts.shortBy': 'ঘাটতি',
+  'dashboard.alerts.restock': 'ক্রয় করুন',
+  'dashboard.alerts.lowStockEmpty':
+    'সকল মালামালের স্টক ন্যূনতম সীমার উপরে রয়েছে।',
+  'dashboard.alerts.pendingDeliveryTitle': 'ডেলিভারি অপেক্ষমাণ (রেডি)',
+  'dashboard.alerts.readyCount': 'টি ডেলিভারির জন্য প্রস্তুত',
+  'dashboard.alerts.pendingDeliveryEmpty':
+    'বর্তমানে কোনো প্রস্তুত অর্ডার ডেলিভারির অপেক্ষায় নেই।',
+  'dashboard.alerts.inProgressNote': 'টি অর্ডার বর্তমানে প্রসেসিং/ডাইং/ওয়াশিং পর্যায়ে আছে',
+  'dashboard.alerts.viewMore': 'টি আরও রয়েছে',
 
   // Clients Module
   'clients.kpi.totalClients': 'মোট ক্লায়েন্ট',

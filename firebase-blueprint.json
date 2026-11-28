@@ -1054,6 +1054,146 @@
         "firstAdminUid",
         "initializedAt"
       ]
+    },
+    "Cheque": {
+      "title": "Cheque",
+      "description": "A client cheque instrument tracked through Pending, Endorsed to Supplier, Cleared (Self), Cleared (Supplier), or Bounced with atomic ledger and bank settlement.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "clientId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "clientName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "amount": {
+          "type": "number"
+        },
+        "bankName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "chequeNo": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "chequeDate": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 10,
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "Pending",
+            "Endorsed to Supplier",
+            "Cleared (Self)",
+            "Cleared (Supplier)",
+            "Bounced"
+          ]
+        },
+        "endorsedSupplierId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "endorsedSupplierName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "endorsedDate": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 10,
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "clearedDate": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 10,
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "bouncedDate": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 10,
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "bounceReason": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 300
+        },
+        "moneyInId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "clientLedgerEntryId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "supplierLedgerEntryId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "note": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 300
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "ownerId",
+        "clientId",
+        "clientName",
+        "amount",
+        "bankName",
+        "chequeNo",
+        "chequeDate",
+        "status",
+        "endorsedSupplierId",
+        "endorsedSupplierName",
+        "endorsedDate",
+        "clearedDate",
+        "bouncedDate",
+        "bounceReason",
+        "moneyInId",
+        "clientLedgerEntryId",
+        "supplierLedgerEntryId",
+        "note",
+        "createdAt",
+        "updatedAt"
+      ]
     }
   },
   "firestore": {
@@ -1120,6 +1260,10 @@
     "/salary_payments/{salaryId}": {
       "schema": { "$ref": "#/entities/SalaryPayment" },
       "description": "Append-only monthly employee salary payment records restricted to admin, atomically linked to money_out (SAL-*) and deducted employee_advances."
+    },
+    "/cheques/{chequeId}": {
+      "schema": { "$ref": "#/entities/Cheque" },
+      "description": "Client cheque lifecycle log restricted to admin and accountant, enforcing atomic bank/ledger posting on Self Clear and Cleared by Supplier."
     }
   }
 }

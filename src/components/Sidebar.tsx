@@ -202,20 +202,28 @@ export function Sidebar({
   const sidebarContent = (
     <div className="h-full flex flex-col bg-[#0f172a] text-slate-200 border-r border-slate-800 select-none">
       {/* Brand header */}
-      <div className="h-16 px-5 flex items-center justify-between border-b border-slate-800/90 shrink-0">
-        <div className="flex items-center gap-3 min-w-0">
+      <div className="min-h-16 px-4 py-2.5 flex items-center justify-between gap-2 border-b border-slate-800/90 shrink-0">
+        <div
+          className="flex items-center gap-3 min-w-0"
+          title="মায়ের দোয়া ওয়াশিং এন্ড প্রসেসিং মিলস্"
+        >
           <div className="w-8 h-8 rounded-md bg-[#1e3a8a] border border-blue-400/20 flex items-center justify-center text-white shrink-0">
             <Layers className="w-4 h-4" />
           </div>
-          <span className="font-display text-base font-semibold tracking-tight text-white truncate">
-            IndigoMill Ledger
-          </span>
+          <div className="min-w-0 flex-1">
+            <span className="block font-display text-sm font-semibold tracking-tight text-white leading-tight truncate">
+              Mayer Doa washing
+            </span>
+            <span className="block text-[11px] font-normal text-slate-400 leading-snug mt-0.5 break-words">
+              মায়ের দোয়া ওয়াশিং এন্ড প্রসেসিং মিলস্
+            </span>
+          </div>
         </div>
         <button
           type="button"
           onClick={onCloseMobile}
           aria-label="Close navigation menu"
-          className="lg:hidden p-1.5 text-slate-400 hover:text-white rounded-md transition-colors cursor-pointer"
+          className="lg:hidden p-1.5 text-slate-400 hover:text-white rounded-md transition-colors cursor-pointer shrink-0"
         >
           <X className="w-5 h-5" />
         </button>

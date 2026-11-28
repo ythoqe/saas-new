@@ -3,6 +3,7 @@ import {
   ArrowDownLeft,
   ArrowLeftRight,
   ArrowUpRight,
+  FileCheck2,
   Landmark,
   RotateCcw,
   Search,
@@ -10,6 +11,7 @@ import {
   Wallet,
 } from 'lucide-react';
 import type {
+  ChequeRecord,
   ClientRecord,
   EmployeeRecord,
   MoneyInRecord,
@@ -25,19 +27,25 @@ import {
   roundCurrency,
   timestampToDate,
 } from '../utils/ledger';
+import type { ChequeActionKind } from './ChequeActionModal';
+import { ChequesPanel } from './ChequesPanel';
 
+type AccountsTab = 'accounts' | 'cheques';
 type AccountFilter = 'All' | PaymentMethod;
 type FlowFilter = 'all' | 'in' | 'out' | 'transfer';
 
 interface AccountsViewProps {
   moneyInRecords: MoneyInRecord[];
   moneyOutRecords: MoneyOutRecord[];
+  cheques: ChequeRecord[];
   clientsById: Map<string, ClientRecord>;
   suppliersById: Map<string, SupplierRecord>;
   employeesById: Map<string, EmployeeRecord>;
   isLoading: boolean;
   canAdjustLedgers: boolean;
   onOpenTransfer: (defaultFrom?: PaymentMethod) => void;
+  onOpenReceiveCheque: () => void;
+  onTriggerChequeAction: (cheque: ChequeRecord, action: ChequeActionKind) => void;
   onCorrectMoneyIn: (record: MoneyInRecord) => void;
   onCorrectMoneyOut: (record: MoneyOutRecord) => void;
 }
@@ -125,18 +133,30 @@ function resolveRecordIsoDate(
 export function AccountsView({
   moneyInRecords,
   moneyOutRecords,
+  cheques,
   clientsById,
   suppliersById,
   employeesById,
   isLoading,
   canAdjustLedgers,
   onOpenTransfer,
+  onOpenReceiveCheque,
+  onTriggerChequeAction,
   onCorrectMoneyIn,
   onCorrectMoneyOut,
 }: AccountsViewProps) {
+  const [activeTab, setActiveTab] = useState<AccountsTab>('accounts');
   const [accountFilter, setAccountFilter] = useState<AccountFilter>('All');
   const [flowFilter, setFlowFilter] = useState<FlowFilter>('all');
   const [searchQuery, setSearchQuery] = useState('');
+
+  const activeChequeCount = useMemo(
+    () =>
+      cheques.filter(
+        (c) => c.status === 'Pending' || c.status === 'Endorsed to Supplier'
+      ).length,
+    [cheques]
+  );
 
   // Dynamic per-account balances: Sum(money_in by method) - Sum(money_out by method)
   const accountStats = useMemo(() => {
@@ -387,6 +407,66 @@ export function AccountsView({
 
   return (
     <div className="space-y-6">
+      {/* Module Sub-Navigation: Accounts & Transfers vs Cheques */}
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-3">
+        <div className="inline-flex items-center bg-slate-100 p-1 rounded-lg border border-slate-200">
+          <button
+            type="button"
+            onClick={() => setActiveTab('accounts')}
+            className={`inline-flex items-center gap-2 px-3.5 py-2 text-xs sm:text-sm font-medium rounded-md transition-all cursor-pointer ${
+              activeTab === 'accounts'
+                ? 'bg-white text-[#1e3a8a] shadow-xs'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <Wallet className="w-4 h-4 shrink-0" />
+            Accounts &amp; Transfers
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('cheques')}
+            className={`inline-flex items-center gap-2 px-3.5 py-2 text-xs sm:text-sm font-medium rounded-md transition-all cursor-pointer ${
+              activeTab === 'cheques'
+                ? 'bg-white text-[#1e3a8a] shadow-xs'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <FileCheck2 className="w-4 h-4 shrink-0" />
+            Cheques
+            {activeChequeCount > 0 && (
+              <span
+                className={`px-1.5 py-0.5 text-[11px] font-semibold rounded tabular-nums ${
+                  activeTab === 'cheques'
+                    ? 'bg-amber-100 text-amber-800'
+                    : 'bg-amber-200/80 text-amber-900'
+                }`}
+              >
+                {formatNumber(activeChequeCount, 0)}
+              </span>
+            )}
+          </button>
+        </div>
+
+        {activeTab === 'accounts' && activeChequeCount > 0 && (
+          <button
+            type="button"
+            onClick={() => setActiveTab('cheques')}
+            className="text-xs font-medium text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 px-3 py-1.5 rounded-md transition-colors cursor-pointer"
+          >
+            {formatNumber(activeChequeCount, 0)} active cheque
+            {activeChequeCount === 1 ? '' : 's'} awaiting clearance →
+          </button>
+        )}
+      </div>
+
+      {activeTab === 'cheques' ? (
+        <ChequesPanel
+          cheques={cheques}
+          onOpenReceiveCheque={onOpenReceiveCheque}
+          onTriggerAction={onTriggerChequeAction}
+        />
+      ) : (
+        <>
       {/* 3 Main Account Balance Cards */}
       <section className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {(['Cash', 'Bank', 'Mobile Banking'] as const).map((method) => {
@@ -774,6 +854,8 @@ export function AccountsView({
           </table>
         </div>
       </section>
+        </>
+      )}
     </div>
   );
 }

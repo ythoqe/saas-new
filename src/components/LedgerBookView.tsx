@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { BookOpen, Printer, RotateCcw, Search } from 'lucide-react';
+import { BookOpen, MessageCircle, Printer, RotateCcw, Search } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
 import type {
   ClientLedgerEntry,
@@ -10,8 +10,10 @@ import {
   calculateLedgerTotals,
   formatCurrency,
   formatDateTime,
+  roundCurrency,
   timestampToDate,
 } from '../utils/ledger';
+import { buildPaymentWhatsAppUrl } from '../utils/whatsapp';
 
 type TypeFilter = 'all' | LedgerTxnType;
 
@@ -32,9 +34,21 @@ export function LedgerBookView({
   onPrintInvoiceEntry,
   onCorrectLedgerEntry,
 }: LedgerBookViewProps) {
-  const { t, translateTxnType } = useLanguage();
+  const { lang, t, translateTxnType } = useLanguage();
   const [searchQuery, setSearchQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
+
+  const dueByClientId = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const entry of entries) {
+      const prev = map.get(entry.clientId) ?? 0;
+      map.set(
+        entry.clientId,
+        roundCurrency(prev + (Number(entry.debit) || 0) - (Number(entry.credit) || 0))
+      );
+    }
+    return map;
+  }, [entries]);
 
   const sortedAndFiltered = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -254,6 +268,33 @@ export function LedgerBookView({
                               {t('common.printInvoice')}
                             </button>
                           ) : null}
+                          {entry.txn_type === 'payment' && entry.credit > 0 && client
+                            ? (() => {
+                                const paymentWaUrl = buildPaymentWhatsAppUrl({
+                                  mobile: client.mobile,
+                                  clientName: client.clientName,
+                                  paidAmount: entry.credit,
+                                  currentDue: dueByClientId.get(entry.clientId) ?? 0,
+                                  lang,
+                                });
+                                return paymentWaUrl ? (
+                                  <a
+                                    href={paymentWaUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    title={
+                                      lang === 'bn'
+                                        ? 'WhatsApp-এ পেমেন্ট রসিদ পাঠান'
+                                        : 'Send Payment Receipt on WhatsApp'
+                                    }
+                                    className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-white bg-green-600 hover:bg-green-700 rounded transition-colors whitespace-nowrap shrink-0"
+                                  >
+                                    <MessageCircle className="w-3.5 h-3.5 shrink-0" />
+                                    WhatsApp
+                                  </a>
+                                ) : null;
+                              })()
+                            : null}
                           <button
                             type="button"
                             onClick={() => onCorrectLedgerEntry(entry)}

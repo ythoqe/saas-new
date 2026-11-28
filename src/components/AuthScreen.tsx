@@ -29,12 +29,17 @@ export function AuthScreen() {
       <div className="lg:w-[46%] bg-[#0f172a] text-slate-100 p-8 sm:p-12 lg:p-16 flex flex-col justify-between border-b lg:border-b-0 lg:border-r border-slate-800">
         <div>
           <div className="flex items-center gap-3 mb-12">
-            <div className="w-9 h-9 rounded-md bg-[#1e3a8a] border border-blue-400/20 flex items-center justify-center text-white">
+            <div className="w-9 h-9 rounded-md bg-[#1e3a8a] border border-blue-400/20 flex items-center justify-center text-white shrink-0">
               <Layers className="w-5 h-5" />
             </div>
-            <span className="font-display text-lg font-semibold tracking-tight text-white">
-              IndigoMill Ledger
-            </span>
+            <div className="min-w-0">
+              <span className="block font-display text-lg font-semibold tracking-tight text-white leading-tight">
+                Mayer Doa washing
+              </span>
+              <span className="block text-xs text-slate-300 mt-0.5">
+                মায়ের দোয়া ওয়াশিং এন্ড প্রসেসিং মিলস্
+              </span>
+            </div>
           </div>
 
           <h1 className="font-display text-3xl sm:text-4xl font-semibold tracking-tight text-white leading-tight max-w-md mb-5">

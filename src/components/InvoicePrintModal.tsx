@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react';
 import {
   FileText,
+  MessageCircle,
   Printer,
   Settings2,
   Truck,
   X,
 } from 'lucide-react';
+import { useLanguage } from '../contexts/LanguageContext';
 import type {
   ClientLedgerEntry,
   ClientRecord,
@@ -19,6 +21,7 @@ import {
   roundCurrency,
   timestampToDate,
 } from '../utils/ledger';
+import { buildOrderWhatsAppUrl } from '../utils/whatsapp';
 
 export type PrintDocumentType = 'invoice' | 'challan';
 export type PrintPaperSize = 'thermal' | 'a4';
@@ -79,6 +82,7 @@ export function InvoicePrintModal({
   payload,
   onClose,
 }: InvoicePrintModalProps) {
+  const { lang } = useLanguage();
   const [docType, setDocType] = useState<PrintDocumentType>('invoice');
   const [paperSize, setPaperSize] = useState<PrintPaperSize>('thermal');
   const [showHeaderSettings, setShowHeaderSettings] = useState(false);
@@ -161,6 +165,19 @@ export function InvoicePrintModal({
   const isChallan = docType === 'challan';
   const hasLaterActivity =
     Math.abs(roundCurrency(liveCurrentDue - totalDue)) >= 0.01;
+  const orderWhatsAppUrl =
+    client && order
+      ? buildOrderWhatsAppUrl({
+          mobile: client.mobile,
+          clientName: client.clientName,
+          orderId: order.id,
+          than: order.greyFabricThan,
+          greyGaj: order.greyFabricGaj,
+          finalGaj: finalGaj ?? order.greyFabricGaj,
+          totalBill: billAmount,
+          lang,
+        })
+      : null;
 
   return (
     <div
@@ -273,6 +290,23 @@ export function InvoicePrintModal({
             >
               <Settings2 className="w-4 h-4" />
             </button>
+
+            {orderWhatsAppUrl && (
+              <a
+                href={orderWhatsAppUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                title={
+                  lang === 'bn'
+                    ? 'WhatsApp-এ বিল মেসেজ পাঠান'
+                    : 'Send Order Update on WhatsApp'
+                }
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-white bg-green-600 hover:bg-green-700 rounded-md transition-colors whitespace-nowrap shrink-0"
+              >
+                <MessageCircle className="w-3.5 h-3.5" />
+                WhatsApp
+              </a>
+            )}
 
             <button
               type="button"
