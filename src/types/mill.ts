@@ -50,13 +50,23 @@ export type OrderStatus = InProgressOrderStatus | 'Delivered';
 
 export const PAYMENT_METHODS = ['Cash', 'Bank', 'Mobile Banking'] as const;
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
+export const ACCOUNT_TYPES = PAYMENT_METHODS;
+export type AccountType = PaymentMethod;
 
 export type PurchaseStatus = 'Pending' | 'Paid';
 
-export const SUPPLIER_PAYMENT_METHODS = ['Cash', 'Bank'] as const;
+export const SUPPLIER_PAYMENT_METHODS = [
+  'Cash',
+  'Bank',
+  'Mobile Banking',
+] as const;
 export type SupplierPaymentMethod = (typeof SUPPLIER_PAYMENT_METHODS)[number];
 
-export const EXPENSE_PAYMENT_METHODS = ['Cash', 'Bank'] as const;
+export const EXPENSE_PAYMENT_METHODS = [
+  'Cash',
+  'Bank',
+  'Mobile Banking',
+] as const;
 export type ExpensePaymentMethod = (typeof EXPENSE_PAYMENT_METHODS)[number];
 
 export const EXPENSE_CATEGORIES = [
@@ -104,10 +114,18 @@ export const EMPLOYEE_DEPARTMENTS = [
 ] as const;
 export type EmployeeDepartment = (typeof EMPLOYEE_DEPARTMENTS)[number];
 
-export const ADVANCE_PAYMENT_METHODS = ['Cash', 'Bank'] as const;
+export const ADVANCE_PAYMENT_METHODS = [
+  'Cash',
+  'Bank',
+  'Mobile Banking',
+] as const;
 export type AdvancePaymentMethod = (typeof ADVANCE_PAYMENT_METHODS)[number];
 
-export const SALARY_PAYMENT_METHODS = ['Cash', 'Bank'] as const;
+export const SALARY_PAYMENT_METHODS = [
+  'Cash',
+  'Bank',
+  'Mobile Banking',
+] as const;
 export type SalaryPaymentMethod = (typeof SALARY_PAYMENT_METHODS)[number];
 
 export const CHEQUE_STATUSES = [
@@ -177,6 +195,16 @@ export interface OrderRecord {
   updatedAt: Timestamp | null;
 }
 
+export interface AccountRecord {
+  id: string;
+  ownerId: string;
+  accountName: string;
+  accountType: PaymentMethod;
+  openingBalance: number;
+  createdAt: Timestamp | null;
+  updatedAt: Timestamp | null;
+}
+
 export interface MoneyInRecord {
   id: string;
   ownerId: string;
@@ -184,6 +212,10 @@ export interface MoneyInRecord {
   category?: 'Transfer' | null;
   transferId?: string;
   counterAccount?: PaymentMethod | null;
+  accountId?: string;
+  accountName?: string;
+  counterAccountId?: string;
+  counterAccountName?: string;
   clientId: string;
   ledgerEntryId: string;
   reference: string;
@@ -245,6 +277,10 @@ export interface MoneyOutRecord {
   salaryPaymentId: string;
   transferId?: string;
   counterAccount?: PaymentMethod | null;
+  accountId?: string;
+  accountName?: string;
+  counterAccountId?: string;
+  counterAccountName?: string;
   category: ExpenseCategory | 'Employee Advance' | 'Transfer' | null;
   reference: string;
   amount: number;
@@ -263,6 +299,8 @@ export interface ExpenseRecord {
   category: ExpenseCategory;
   amount: number;
   paymentMethod: ExpensePaymentMethod;
+  accountId?: string;
+  accountName?: string;
   description: string;
   createdAt: Timestamp | null;
 }
@@ -499,6 +537,12 @@ export const CHEQUE_VALIDATION = {
   noteMax: 300,
   bounceReasonMax: 300,
   datePattern: /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/,
+} as const;
+
+export const ACCOUNT_VALIDATION = {
+  accountNameMin: 1,
+  accountNameMax: 120,
+  maxOpeningBalance: 1000000000,
 } as const;
 
 

@@ -208,6 +208,28 @@
           "type": "string",
           "enum": ["Cash", "Bank", "Mobile Banking"]
         },
+        "accountId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "accountName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "counterAccountId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "counterAccountName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
         "clientId": {
           "type": "string",
           "minLength": 1,
@@ -532,6 +554,28 @@
           "type": "string",
           "enum": ["Cash", "Bank", "Mobile Banking"]
         },
+        "accountId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "accountName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "counterAccountId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "counterAccountName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
         "note": {
           "type": "string",
           "minLength": 0,
@@ -599,7 +643,18 @@
         },
         "paymentMethod": {
           "type": "string",
-          "enum": ["Cash", "Bank"]
+          "enum": ["Cash", "Bank", "Mobile Banking"]
+        },
+        "accountId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "accountName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
         },
         "description": {
           "type": "string",
@@ -1239,9 +1294,54 @@
         "createdAt",
         "updatedAt"
       ]
+    },
+    "Account": {
+      "title": "Account",
+      "description": "A dynamic Cash, Bank, or Mobile Banking financial account (e.g., Main Cash, City Bank, Islami Bank, bKash Merchant, Nagad) whose live balance is calculated from openingBalance + Sum(money_in) - Sum(money_out).",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "accountName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "accountType": {
+          "type": "string",
+          "enum": ["Cash", "Bank", "Mobile Banking"]
+        },
+        "openingBalance": {
+          "type": "number"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "ownerId",
+        "accountName",
+        "accountType",
+        "openingBalance",
+        "createdAt",
+        "updatedAt"
+      ]
     }
   },
   "firestore": {
+    "/accounts/{accountId}": {
+      "schema": { "$ref": "#/entities/Account" },
+      "description": "Dynamic financial accounts (Cash, Bank, Mobile Banking) accessible to admin and accountant."
+    },
     "/allowed_users/{emailKey}": {
       "schema": { "$ref": "#/entities/AllowedUser" },
       "description": "Invite-only email allowlist determining app access and assigned RBAC role (admin, manager, accountant). Self-readable by exact email match; listable and manageable only by admin."

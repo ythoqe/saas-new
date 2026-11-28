@@ -5,6 +5,7 @@ import {
   deleteDoc,
   doc,
   getDoc,
+  getDocs,
   onSnapshot,
   serverTimestamp,
   setDoc,
@@ -29,6 +30,7 @@ import {
 } from './contexts/LanguageContext';
 import { AccountsView } from './components/AccountsView';
 import { AccountTransferModal } from './components/AccountTransferModal';
+import { AddAccountModal } from './components/AddAccountModal';
 import { AddClientDrawer } from './components/AddClientDrawer';
 import { AddSupplierDrawer } from './components/AddSupplierDrawer';
 import { AuthScreen } from './components/AuthScreen';
@@ -90,6 +92,8 @@ import {
 import { SupplierManagementView } from './components/SupplierManagementView';
 import { UserManagementView } from './components/UserManagementView';
 import type {
+  AccountRecord,
+  AccountType,
   AdvancePaymentMethod,
   AllowedUserRecord,
   ChequeRecord,
@@ -120,6 +124,10 @@ import type {
   UserRole,
 } from './types/mill';
 import {
+  computeDynamicAccountStats,
+  DEFAULT_ACCOUNT_SEEDS,
+} from './utils/accounts';
+import {
   buildClientSummaries,
   buildSupplierSummaries,
   formatCurrency,
@@ -140,6 +148,9 @@ import {
   canViewOrders,
   getDefaultSectionForRole,
   isAdminRole,
+  isBootstrappedAdminEmail,
+  normalizeEmailKey,
+  normalizeUserRole,
 } from './utils/rbac';
 
 interface ToastState {
@@ -186,6 +197,7 @@ function MillDashboardShell() {
     []
   );
   const [cheques, setCheques] = useState<ChequeRecord[]>([]);
+  const [accounts, setAccounts] = useState<AccountRecord[]>([]);
 
   const [clientsLoaded, setClientsLoaded] = useState(false);
   const [ledgerLoaded, setLedgerLoaded] = useState(false);
@@ -197,6 +209,7 @@ function MillDashboardShell() {
   const [moneyOutLoaded, setMoneyOutLoaded] = useState(false);
   const [expensesLoaded, setExpensesLoaded] = useState(false);
   const [chequesLoaded, setChequesLoaded] = useState(false);
+  const [accountsLoaded, setAccountsLoaded] = useState(false);
   const [inventoryLoaded, setInventoryLoaded] = useState(false);
   const [stockMovementsLoaded, setStockMovementsLoaded] = useState(false);
   const [employeesLoaded, setEmployeesLoaded] = useState(false);
@@ -256,10 +269,12 @@ function MillDashboardShell() {
     useState<ReportPrintPayload | null>(null);
   const [reportPrintSignal, setReportPrintSignal] = useState(0);
 
-  // Accounts / Finance transfer & cheque modals
+  // Accounts / Finance transfer, add account & cheque modals
+  const [addAccountModalOpen, setAddAccountModalOpen] = useState(false);
   const [transferModalOpen, setTransferModalOpen] = useState(false);
-  const [transferFromAccount, setTransferFromAccount] =
-    useState<PaymentMethod>('Cash');
+  const [transferFromAccountId, setTransferFromAccountId] = useState<
+    string | undefined
+  >(undefined);
   const [receiveChequeModalOpen, setReceiveChequeModalOpen] = useState(false);
   const [chequeActionTarget, setChequeActionTarget] =
     useState<ChequeActionTarget | null>(null);
@@ -305,6 +320,9 @@ function MillDashboardShell() {
         setSalaryPaymentsLoaded(false);
         setCheques([]);
         setChequesLoaded(false);
+        setAccounts([]);
+        setAccountsLoaded(false);
+        setAddAccountModalOpen(false);
         setPayingSalaryEmployeeId(null);
         setReceiveChequeModalOpen(false);
         setChequeActionTarget(null);
@@ -359,103 +377,188 @@ function MillDashboardShell() {
     };
 
     const bootstrapAndListen = async () => {
-      const cleanEmail = (user.email ?? '').trim();
-      const emailKey = cleanEmail.toLowerCase();
-      const cleanDisplayName = (user.displayName ?? '').trim().slice(0, 120);
+      const rawEmail =
+        user.email ||
+        user.providerData?.find((p) => Boolean(p?.email))?.email ||
+        '';
+      const cleanEmail = rawEmail.trim();
+      const emailKey = normalizeEmailKey(cleanEmail);
+      const cleanDisplayName = (
+        user.displayName ||
+        user.providerData?.find((p) => Boolean(p?.displayName))?.displayName ||
+        cleanEmail.split('@')[0] ||
+        'User'
+      )
+        .trim()
+        .slice(0, 120);
 
       if (!emailKey) {
         await denyAndSignOut();
         return;
       }
 
-      const isBootstrapped =
-        emailKey === BOOTSTRAPPED_ADMIN_EMAIL.toLowerCase();
+      const isBootstrapped = isBootstrappedAdminEmail(emailKey);
       const allowedDocRef = doc(db, 'allowed_users', emailKey);
       const userDocRef = doc(db, 'users', user.uid);
 
       try {
-        const allowedSnap = await getDoc(allowedDocRef);
-        let assignedRole: UserRole = 'manager';
+        // 1. Check direct canonical document ID (allowed_users/{lowercaseEmail})
+        const canonicalAllowedSnap = await getDoc(allowedDocRef);
+        let foundInAllowedUsers = canonicalAllowedSnap.exists();
+        let matchedRole: UserRole = foundInAllowedUsers
+          ? normalizeUserRole(canonicalAllowedSnap.data()?.role)
+          : 'manager';
 
-        if (!allowedSnap.exists()) {
-          // Check if this user is the primary/first Admin so we never get locked out
+        // 2. Also query allowed_users collection to match any document where email field or doc ID matches case-insensitively without spacing issues
+        if (!foundInAllowedUsers || matchedRole !== 'admin') {
+          try {
+            const allAllowedSnap = await getDocs(
+              collection(db, 'allowed_users')
+            );
+            const rolePriority: Record<UserRole, number> = {
+              admin: 3,
+              accountant: 2,
+              manager: 1,
+            };
+
+            for (const docSnap of allAllowedSnap.docs) {
+              const data = docSnap.data();
+              const docEmail = normalizeEmailKey(data.email);
+              const docIdEmail = normalizeEmailKey(docSnap.id);
+
+              if (docEmail === emailKey || docIdEmail === emailKey) {
+                const candidateRole = normalizeUserRole(data.role);
+                if (
+                  !foundInAllowedUsers ||
+                  rolePriority[candidateRole] > rolePriority[matchedRole]
+                ) {
+                  matchedRole = candidateRole;
+                }
+                foundInAllowedUsers = true;
+              }
+            }
+          } catch {
+            // If collection list fails, rely on canonical doc check
+          }
+        }
+
+        let assignedRole: UserRole = isBootstrapped ? 'admin' : matchedRole;
+
+        if (!foundInAllowedUsers) {
+          // Check if this user is a bootstrapped Admin or the very first Admin so we never get locked out
           const bootstrapRef = doc(db, 'app_meta', 'bootstrap');
           const bootstrapSnap = await getDoc(bootstrapRef);
 
           if (isBootstrapped || !bootstrapSnap.exists()) {
             assignedRole = 'admin';
-            const existingUserSnap = await getDoc(userDocRef);
-            const batch = writeBatch(db);
 
-            batch.set(allowedDocRef, {
+            await setDoc(allowedDocRef, {
               email: emailKey,
               role: 'admin',
               invitedByUid: user.uid,
-              invitedByEmail: cleanEmail,
+              invitedByEmail: cleanEmail || emailKey,
               createdAt: serverTimestamp(),
               updatedAt: serverTimestamp(),
             });
 
+            const existingUserSnap = await getDoc(userDocRef);
             if (!existingUserSnap.exists()) {
-              batch.set(userDocRef, {
+              await setDoc(userDocRef, {
                 uid: user.uid,
-                email: cleanEmail,
+                email: cleanEmail || emailKey,
                 displayName: cleanDisplayName,
                 role: 'admin',
                 createdAt: serverTimestamp(),
                 updatedAt: serverTimestamp(),
               });
-            }
-
-            if (!bootstrapSnap.exists()) {
-              batch.set(bootstrapRef, {
-                firstAdminUid: user.uid,
-                initializedAt: serverTimestamp(),
+            } else if (
+              normalizeUserRole(existingUserSnap.data()?.role) !== 'admin'
+            ) {
+              await updateDoc(userDocRef, {
+                role: 'admin',
+                updatedAt: serverTimestamp(),
               });
             }
 
-            await batch.commit();
+            if (!bootstrapSnap.exists()) {
+              try {
+                await setDoc(bootstrapRef, {
+                  firstAdminUid: user.uid,
+                  initializedAt: serverTimestamp(),
+                });
+              } catch {
+                // Ignore if bootstrap sentinel was already created
+              }
+            }
           } else {
             // Email does NOT exist in allowed_users -> sign out immediately
             await denyAndSignOut();
             return;
           }
         } else {
-          const allowedData = allowedSnap.data();
-          const rawAllowedRole = String(allowedData.role ?? 'manager');
-          assignedRole =
-            rawAllowedRole === 'admin' ||
-            rawAllowedRole === 'manager' ||
-            rawAllowedRole === 'accountant'
-              ? rawAllowedRole
-              : 'manager';
+          // User IS in allowed_users!
+          // Self-heal canonical allowed_users/{emailKey} if it was created with an auto-ID or had unnormalized email/role casing
+          const canonicalData = canonicalAllowedSnap.exists()
+            ? canonicalAllowedSnap.data()
+            : null;
+          const needsCanonicalSync =
+            !canonicalAllowedSnap.exists() ||
+            canonicalData?.email !== emailKey ||
+            canonicalData?.role !== assignedRole;
 
+          if (needsCanonicalSync) {
+            try {
+              if (!canonicalAllowedSnap.exists()) {
+                await setDoc(allowedDocRef, {
+                  email: emailKey,
+                  role: assignedRole,
+                  invitedByUid: user.uid,
+                  invitedByEmail: cleanEmail || emailKey,
+                  createdAt: serverTimestamp(),
+                  updatedAt: serverTimestamp(),
+                });
+              } else {
+                await updateDoc(allowedDocRef, {
+                  email: emailKey,
+                  role: assignedRole,
+                  invitedByUid:
+                    typeof canonicalData?.invitedByUid === 'string' &&
+                    canonicalData.invitedByUid.trim().length > 0
+                      ? canonicalData.invitedByUid.trim()
+                      : user.uid,
+                  invitedByEmail:
+                    typeof canonicalData?.invitedByEmail === 'string' &&
+                    canonicalData.invitedByEmail.trim().length >= 3
+                      ? canonicalData.invitedByEmail.trim()
+                      : cleanEmail || emailKey,
+                  createdAt: canonicalData?.createdAt ?? serverTimestamp(),
+                  updatedAt: serverTimestamp(),
+                });
+              }
+            } catch {
+              // Ignore non-fatal canonical normalization error if rules already pass
+            }
+          }
+
+          // Ensure /users/{uid} profile exists and matches the assigned role from allowed_users
           const existingUserSnap = await getDoc(userDocRef);
           if (!existingUserSnap.exists()) {
             await setDoc(userDocRef, {
               uid: user.uid,
-              email: cleanEmail,
+              email: cleanEmail || emailKey,
               displayName: cleanDisplayName,
               role: assignedRole,
               createdAt: serverTimestamp(),
               updatedAt: serverTimestamp(),
             });
           } else {
-            const existingRole = String(existingUserSnap.data().role ?? '');
-            if (existingRole !== assignedRole) {
-              await setDoc(
-                userDocRef,
-                {
-                  uid: user.uid,
-                  email: cleanEmail,
-                  displayName:
-                    String(existingUserSnap.data().displayName ?? '') ||
-                    cleanDisplayName,
-                  role: assignedRole,
-                  createdAt: existingUserSnap.data().createdAt,
-                  updatedAt: serverTimestamp(),
-                }
-              );
+            const existingData = existingUserSnap.data();
+            const existingRawRole = String(existingData.role ?? '');
+            if (existingRawRole !== assignedRole) {
+              await updateDoc(userDocRef, {
+                role: assignedRole,
+                updatedAt: serverTimestamp(),
+              });
             }
           }
         }
@@ -485,12 +588,22 @@ function MillDashboardShell() {
 
       if (cancelled) return;
 
-      // Real-time listener on allowed_users/{emailKey} so revoking an invite signs them out immediately
+      // Real-time listener on allowed_users collection so revoking an invite signs them out immediately,
+      // while matching email case-insensitively and ignoring whitespace across all docs
       unsubAllowedDoc = onSnapshot(
-        allowedDocRef,
-        (allowedSnap) => {
+        collection(db, 'allowed_users'),
+        (snapshot) => {
           if (cancelled) return;
-          if (!allowedSnap.exists() && !isBootstrapped) {
+          const stillAllowed =
+            isBootstrapped ||
+            snapshot.docs.some((docSnap) => {
+              const data = docSnap.data();
+              return (
+                normalizeEmailKey(data.email) === emailKey ||
+                normalizeEmailKey(docSnap.id) === emailKey
+              );
+            });
+          if (!stillAllowed) {
             void denyAndSignOut();
           }
         },
@@ -505,16 +618,12 @@ function MillDashboardShell() {
           if (cancelled) return;
           if (docSnap.exists()) {
             const data = docSnap.data();
-            const rawRole = String(data.role ?? 'manager');
-            const parsedRole: UserRole =
-              rawRole === 'admin' ||
-              rawRole === 'manager' ||
-              rawRole === 'accountant'
-                ? rawRole
-                : 'manager';
+            const parsedRole: UserRole = isBootstrapped
+              ? 'admin'
+              : normalizeUserRole(data.role);
             setUserProfile({
               uid: String(data.uid ?? docSnap.id),
-              email: String(data.email ?? user.email ?? ''),
+              email: String(data.email ?? cleanEmail ?? ''),
               displayName: String(data.displayName ?? user.displayName ?? ''),
               role: parsedRole,
               createdAt: data.createdAt ?? null,
@@ -862,12 +971,77 @@ function MillDashboardShell() {
       setStockMovementsLoaded(true);
     }
 
-    // 4. Cashflow, Expenses & Cheques (Admin & Accountant ONLY)
+    // 4. Cashflow, Accounts, Expenses & Cheques (Admin & Accountant ONLY)
     if (canViewCashflow(userRole)) {
       setMoneyInLoaded(false);
       setMoneyOutLoaded(false);
       setExpensesLoaded(false);
       setChequesLoaded(false);
+      setAccountsLoaded(false);
+
+      let seededDefaultAccounts = false;
+
+      unsubscribers.push(
+        onSnapshot(
+          collection(db, 'accounts'),
+          (snapshot) => {
+            if (snapshot.empty && !seededDefaultAccounts) {
+              seededDefaultAccounts = true;
+              const seedBatch = writeBatch(db);
+              for (const seed of DEFAULT_ACCOUNT_SEEDS) {
+                seedBatch.set(doc(db, 'accounts', seed.id), {
+                  ownerId: user.uid,
+                  accountName: seed.accountName,
+                  accountType: seed.accountType,
+                  openingBalance: seed.openingBalance,
+                  createdAt: serverTimestamp(),
+                  updatedAt: serverTimestamp(),
+                });
+              }
+              void seedBatch.commit().catch(() => {
+                // Fallback to DEFAULT_ACCOUNT_SEEDS in memory if seeding is skipped
+              });
+            }
+
+            const loadedAccounts = snapshot.docs.map((docSnap) => {
+              const data = docSnap.data();
+              const rawType = String(data.accountType ?? 'Cash');
+              const accountType: AccountType =
+                rawType === 'Bank' || rawType === 'Mobile Banking'
+                  ? rawType
+                  : 'Cash';
+              return {
+                id: docSnap.id,
+                ownerId: String(data.ownerId ?? ''),
+                accountName: String(data.accountName ?? ''),
+                accountType,
+                openingBalance: Number(data.openingBalance ?? 0),
+                createdAt: data.createdAt ?? null,
+                updatedAt: data.updatedAt ?? null,
+              };
+            });
+
+            const defaultOrder: Record<string, number> = {
+              default_cash: 0,
+              default_bank: 1,
+              default_mobile: 2,
+            };
+            loadedAccounts.sort((a, b) => {
+              const rankA = defaultOrder[a.id] ?? 10;
+              const rankB = defaultOrder[b.id] ?? 10;
+              if (rankA !== rankB) return rankA - rankB;
+              const timeA = timestampToDate(a.createdAt)?.getTime() ?? 0;
+              const timeB = timestampToDate(b.createdAt)?.getTime() ?? 0;
+              if (timeA !== timeB) return timeA - timeB;
+              return a.accountName.localeCompare(b.accountName);
+            });
+
+            setAccounts(loadedAccounts);
+            setAccountsLoaded(true);
+          },
+          (error) => handleListenerError(error, 'accounts')
+        )
+      );
 
       unsubscribers.push(
         onSnapshot(
@@ -897,6 +1071,18 @@ function MillDashboardShell() {
                   counterAccount: data.counterAccount
                     ? (String(data.counterAccount) as PaymentMethod)
                     : null,
+                  counterAccountId: data.counterAccountId
+                    ? String(data.counterAccountId)
+                    : undefined,
+                  counterAccountName: data.counterAccountName
+                    ? String(data.counterAccountName)
+                    : undefined,
+                  accountId: data.accountId
+                    ? String(data.accountId)
+                    : undefined,
+                  accountName: data.accountName
+                    ? String(data.accountName)
+                    : undefined,
                   clientId: String(data.clientId ?? ''),
                   ledgerEntryId: String(data.ledgerEntryId ?? ''),
                   reference: refStr,
@@ -970,6 +1156,18 @@ function MillDashboardShell() {
                   counterAccount: data.counterAccount
                     ? (String(data.counterAccount) as PaymentMethod)
                     : null,
+                  counterAccountId: data.counterAccountId
+                    ? String(data.counterAccountId)
+                    : undefined,
+                  counterAccountName: data.counterAccountName
+                    ? String(data.counterAccountName)
+                    : undefined,
+                  accountId: data.accountId
+                    ? String(data.accountId)
+                    : undefined,
+                  accountName: data.accountName
+                    ? String(data.accountName)
+                    : undefined,
                   category: data.category
                     ? (String(data.category) as
                         | ExpenseCategory
@@ -1009,6 +1207,12 @@ function MillDashboardShell() {
                   category: data.category as ExpenseCategory,
                   amount: Number(data.amount ?? 0),
                   paymentMethod: data.paymentMethod,
+                  accountId: data.accountId
+                    ? String(data.accountId)
+                    : undefined,
+                  accountName: data.accountName
+                    ? String(data.accountName)
+                    : undefined,
                   description: String(data.description ?? ''),
                   createdAt: data.createdAt ?? null,
                 };
@@ -1068,6 +1272,8 @@ function MillDashboardShell() {
       setExpensesLoaded(true);
       setCheques([]);
       setChequesLoaded(true);
+      setAccounts([]);
+      setAccountsLoaded(true);
     }
 
     // 5. Employees, Advances, Salary Payments & User Management (Admin ONLY)
@@ -1179,16 +1385,13 @@ function MillDashboardShell() {
             setRegisteredUsers(
               snapshot.docs.map((docSnap) => {
                 const data = docSnap.data();
-                const rawRole = String(data.role ?? 'manager');
-                const parsedRole: UserRole =
-                  rawRole === 'admin' ||
-                  rawRole === 'manager' ||
-                  rawRole === 'accountant'
-                    ? rawRole
-                    : 'manager';
+                const emailStr = String(data.email ?? '').trim();
+                const parsedRole: UserRole = isBootstrappedAdminEmail(emailStr)
+                  ? 'admin'
+                  : normalizeUserRole(data.role);
                 return {
                   uid: String(data.uid ?? docSnap.id),
-                  email: String(data.email ?? ''),
+                  email: emailStr,
                   displayName: String(data.displayName ?? ''),
                   role: parsedRole,
                   createdAt: data.createdAt ?? null,
@@ -1206,26 +1409,37 @@ function MillDashboardShell() {
         onSnapshot(
           collection(db, 'allowed_users'),
           (snapshot) => {
-            setAllowedUsers(
-              snapshot.docs.map((docSnap) => {
-                const data = docSnap.data();
-                const rawRole = String(data.role ?? 'manager');
-                const parsedRole: UserRole =
-                  rawRole === 'admin' ||
-                  rawRole === 'manager' ||
-                  rawRole === 'accountant'
-                    ? rawRole
-                    : 'manager';
-                return {
-                  email: String(data.email ?? docSnap.id).toLowerCase(),
+            const byEmail = new Map<string, AllowedUserRecord>();
+            const rolePriority: Record<UserRole, number> = {
+              admin: 3,
+              accountant: 2,
+              manager: 1,
+            };
+
+            for (const docSnap of snapshot.docs) {
+              const data = docSnap.data();
+              const emailKey = normalizeEmailKey(data.email || docSnap.id);
+              if (!emailKey) continue;
+              const parsedRole: UserRole = isBootstrappedAdminEmail(emailKey)
+                ? 'admin'
+                : normalizeUserRole(data.role);
+              const existing = byEmail.get(emailKey);
+              if (
+                !existing ||
+                rolePriority[parsedRole] > rolePriority[existing.role]
+              ) {
+                byEmail.set(emailKey, {
+                  email: emailKey,
                   role: parsedRole,
                   invitedByUid: String(data.invitedByUid ?? ''),
-                  invitedByEmail: String(data.invitedByEmail ?? ''),
+                  invitedByEmail: String(data.invitedByEmail ?? '').trim(),
                   createdAt: data.createdAt ?? null,
                   updatedAt: data.updatedAt ?? null,
-                };
-              })
-            );
+                });
+              }
+            }
+
+            setAllowedUsers(Array.from(byEmail.values()));
           },
           (error) => handleListenerError(error, 'allowed_users')
         )
@@ -1412,28 +1626,11 @@ function MillDashboardShell() {
     return roundCurrency(sum);
   }, [givingAdvanceEmployee, employeeAdvances, currentYearMonth]);
 
-  const accountBalances = useMemo<Record<PaymentMethod, number>>(() => {
-    const totals: Record<PaymentMethod, number> = {
-      Cash: 0,
-      Bank: 0,
-      'Mobile Banking': 0,
-    };
-    for (const rec of moneyInRecords) {
-      if (rec.paymentMethod in totals) {
-        totals[rec.paymentMethod] = roundCurrency(
-          totals[rec.paymentMethod] + (Number(rec.amount) || 0)
-        );
-      }
-    }
-    for (const rec of moneyOutRecords) {
-      if (rec.paymentMethod in totals) {
-        totals[rec.paymentMethod] = roundCurrency(
-          totals[rec.paymentMethod] - (Number(rec.amount) || 0)
-        );
-      }
-    }
-    return totals;
-  }, [moneyInRecords, moneyOutRecords]);
+  const dynamicAccountStats = useMemo(
+    () =>
+      computeDynamicAccountStats(accounts, moneyInRecords, moneyOutRecords),
+    [accounts, moneyInRecords, moneyOutRecords]
+  );
 
   const statementPayload = useMemo<StatementPrintPayload | null>(() => {
     if (!statementTarget) return null;
@@ -1501,6 +1698,7 @@ function MillDashboardShell() {
     !moneyOutLoaded ||
     !expensesLoaded ||
     !chequesLoaded ||
+    !accountsLoaded ||
     !inventoryLoaded ||
     !stockMovementsLoaded ||
     !employeesLoaded ||
@@ -2117,6 +2315,14 @@ function MillDashboardShell() {
         <div className="flex items-center gap-2 shrink-0">
           <button
             type="button"
+            onClick={() => setAddAccountModalOpen(true)}
+            className="inline-flex items-center gap-1.5 px-3 sm:px-3.5 py-2 text-xs sm:text-sm font-medium text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-md transition-colors cursor-pointer whitespace-nowrap shrink-0"
+          >
+            <Plus className="w-4 h-4 shrink-0" />
+            Add New Account
+          </button>
+          <button
+            type="button"
             onClick={() => setReceiveChequeModalOpen(true)}
             className="inline-flex items-center gap-1.5 px-3 sm:px-3.5 py-2 text-xs sm:text-sm font-medium text-[#1e3a8a] bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-md transition-colors cursor-pointer whitespace-nowrap shrink-0"
           >
@@ -2126,7 +2332,7 @@ function MillDashboardShell() {
           <button
             type="button"
             onClick={() => {
-              setTransferFromAccount('Cash');
+              setTransferFromAccountId(undefined);
               setTransferModalOpen(true);
             }}
             className="inline-flex items-center gap-2 px-3.5 sm:px-4 py-2 text-xs sm:text-sm font-medium text-white bg-[#1e3a8a] hover:bg-[#1e40af] rounded-md transition-colors cursor-pointer whitespace-nowrap shrink-0"
@@ -2396,15 +2602,16 @@ function MillDashboardShell() {
           {activeSection === 'expenses' && allowCashflow && (
             <ExpensesView
               ownerId={user.uid}
+              accounts={accounts}
               expenses={expenses}
               moneyOutRecords={moneyOutRecords}
               isLoading={isDataLoading}
               focusFormSignal={expenseFormFocusSignal}
               onExpenseCreated={(expenseRef, category, amount, paymentMethod) => {
                 setToast({
-                  message: `Recorded ${category} expense ${expenseRef} (${formatCurrency(amount)} via ${paymentMethod}) and updated Net Cash Balance.`,
-                  actionLabel: 'View Dashboard',
-                  onAction: () => setActiveSection('overview'),
+                  message: `Recorded ${category} expense ${expenseRef} (${formatCurrency(amount)} via ${paymentMethod}) and updated account balance.`,
+                  actionLabel: 'View Accounts',
+                  onAction: () => setActiveSection('accounts'),
                 });
               }}
               onCorrectMoneyOut={handleOpenCorrectMoneyOut}
@@ -2481,6 +2688,7 @@ function MillDashboardShell() {
 
           {activeSection === 'accounts' && allowCashflow && (
             <AccountsView
+              accounts={accounts}
               moneyInRecords={moneyInRecords}
               moneyOutRecords={moneyOutRecords}
               cheques={cheques}
@@ -2489,8 +2697,9 @@ function MillDashboardShell() {
               employeesById={employeesById}
               isLoading={isDataLoading}
               canAdjustLedgers={canAdjust}
-              onOpenTransfer={(defaultFrom) => {
-                setTransferFromAccount(defaultFrom ?? 'Cash');
+              onOpenAddAccount={() => setAddAccountModalOpen(true)}
+              onOpenTransfer={(defaultFromAccountId) => {
+                setTransferFromAccountId(defaultFromAccountId);
                 setTransferModalOpen(true);
               }}
               onOpenReceiveCheque={() => setReceiveChequeModalOpen(true)}
@@ -2612,6 +2821,7 @@ function MillDashboardShell() {
             : 0
         }
         ownerId={user.uid}
+        accounts={accounts}
         onClose={() => setReceivingPaymentClientId(null)}
         onPaymentReceived={(client) => {
           setReceivingPaymentClientId(null);
@@ -2676,6 +2886,7 @@ function MillDashboardShell() {
             : 0
         }
         ownerId={user.uid}
+        accounts={accounts}
         onClose={() => setPayingSupplierId(null)}
         onPaymentSent={(supplier, amount, paymentRef) => {
           setPayingSupplierId(null);
@@ -2708,11 +2919,12 @@ function MillDashboardShell() {
         monthAdvanceSoFar={givingAdvanceMonthTotal}
         currentMonthLabel={currentMonthLabel}
         ownerId={user.uid}
+        accounts={accounts}
         onClose={() => setGivingAdvanceEmployeeId(null)}
         onAdvanceGiven={(employee, amount, advanceRef, paymentMethod) => {
           setGivingAdvanceEmployeeId(null);
           setToast({
-            message: `Issued ${formatCurrency(amount)} advance (${advanceRef} via ${paymentMethod}) to ${employee.name} and updated Net Cash Balance.`,
+            message: `Issued ${formatCurrency(amount)} advance (${advanceRef} via ${paymentMethod}) to ${employee.name} and updated account balance.`,
             actionLabel: 'View Dashboard',
             onAction: () => setActiveSection('overview'),
           });
@@ -2725,6 +2937,7 @@ function MillDashboardShell() {
         advances={employeeAdvances}
         salaryPayments={salaryPayments}
         ownerId={user.uid}
+        accounts={accounts}
         onClose={() => setPayingSalaryEmployeeId(null)}
         onSalaryPaid={(
           employee,
@@ -2793,17 +3006,32 @@ function MillDashboardShell() {
         }}
       />
 
+      {/* Add New Custom Account Modal (City Bank, Islami Bank, bKash Merchant, Nagad, etc.) */}
+      <AddAccountModal
+        open={addAccountModalOpen}
+        ownerId={user.uid}
+        existingAccounts={accounts}
+        onClose={() => setAddAccountModalOpen(false)}
+        onAccountAdded={(accountName, accountType) => {
+          setAddAccountModalOpen(false);
+          setToast({
+            message: `Added account "${accountName}" (${accountType}).`,
+          });
+        }}
+      />
+
       {/* Atomic Account-to-Account Transfer Modal (writeBatch money_out + money_in) */}
       <AccountTransferModal
         open={transferModalOpen}
         ownerId={user.uid}
-        initialFromAccount={transferFromAccount}
-        balances={accountBalances}
+        accounts={accounts}
+        initialFromAccountId={transferFromAccountId}
+        balancesByAccountId={dynamicAccountStats.balancesById}
         onClose={() => setTransferModalOpen(false)}
-        onSuccess={(fromAccount, toAccount, amount, transferRef) => {
+        onSuccess={(fromAccountName, toAccountName, amount, transferRef) => {
           setTransferModalOpen(false);
           setToast({
-            message: `Transferred ${formatCurrency(amount)} from ${fromAccount} to ${toAccount} (${transferRef}).`,
+            message: `Transferred ${formatCurrency(amount)} from ${fromAccountName} to ${toAccountName} (${transferRef}).`,
           });
         }}
       />
@@ -2826,6 +3054,7 @@ function MillDashboardShell() {
       <ChequeActionModal
         target={chequeActionTarget}
         ownerId={user.uid}
+        accounts={accounts}
         supplierSummaries={supplierSummaries}
         onClose={() => setChequeActionTarget(null)}
         onSuccess={(message) => {

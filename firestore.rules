@@ -24,7 +24,11 @@ service cloud.firestore {
       return emailKey is string
         && emailKey.size() >= 3
         && emailKey.size() <= 254
-        && emailKey.matches('^[a-z0-9._%+\\-]+@[a-z0-9.\\-]+\\.[a-z]{2,}$');
+        && emailKey.matches('^[a-zA-Z0-9._%+\\-]+@[a-zA-Z0-9.\\-]+\\.[a-zA-Z]{2,}$');
+    }
+
+    function isValidAllowedDocKey(docKey) {
+      return isValidEmailKey(docKey) || isValidId(docKey);
     }
 
     function incoming() {
@@ -38,13 +42,17 @@ service cloud.firestore {
     // RBAC & Invite-Only Allowlist Helpers (Verified from Firestore /allowed_users/{email} & /users/{uid})
     function isBootstrappedAdmin() {
       return isVerifiedUser()
-        && request.auth.token.email == 'hmmojjammalhoq@gmail.com';
+        && request.auth.token.email is string
+        && (
+          request.auth.token.email.trim().lower() == 'hmmojjammalhoq@gmail.com'
+          || request.auth.token.email.trim().lower() == 'ythoqe@gmail.com'
+        );
     }
 
     function hasAllowedUserDoc() {
       return isVerifiedUser()
         && request.auth.token.email is string
-        && exists(/databases/$(database)/documents/allowed_users/$(request.auth.token.email.lower()));
+        && exists(/databases/$(database)/documents/allowed_users/$(request.auth.token.email.trim().lower()));
     }
 
     function isAllowedUser() {
@@ -52,7 +60,7 @@ service cloud.firestore {
     }
 
     function getAllowedUserRole() {
-      return get(/databases/$(database)/documents/allowed_users/$(request.auth.token.email.lower())).data.role;
+      return get(/databases/$(database)/documents/allowed_users/$(request.auth.token.email.trim().lower())).data.role.trim().lower();
     }
 
     function hasUserProfile() {
@@ -61,7 +69,7 @@ service cloud.firestore {
     }
 
     function getUserRole() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role.trim().lower();
     }
 
     function isAdmin() {
@@ -372,6 +380,8 @@ service cloud.firestore {
           'amount',
           'paymentDate',
           'paymentMethod',
+          'accountId',
+          'accountName',
           'note',
           'createdAt'
         ])
@@ -391,6 +401,8 @@ service cloud.firestore {
         && data.paymentMethod.size() >= 1
         && data.paymentMethod.size() <= 30
         && data.paymentMethod in ['Cash', 'Bank', 'Mobile Banking']
+        && (!('accountId' in data) || isValidId(data.accountId))
+        && (!('accountName' in data) || (data.accountName is string && data.accountName.size() >= 1 && data.accountName.size() <= 120))
         && data.note is string
         && data.note.size() <= 300
         && data.createdAt is timestamp;
@@ -415,6 +427,8 @@ service cloud.firestore {
           'amount',
           'paymentDate',
           'paymentMethod',
+          'accountId',
+          'accountName',
           'note',
           'createdAt'
         ])
@@ -435,6 +449,8 @@ service cloud.firestore {
         && data.paymentMethod.size() >= 1
         && data.paymentMethod.size() <= 30
         && data.paymentMethod in ['Cash', 'Bank', 'Mobile Banking']
+        && (!('accountId' in data) || isValidId(data.accountId))
+        && (!('accountName' in data) || (data.accountName is string && data.accountName.size() >= 1 && data.accountName.size() <= 120))
         && data.note is string
         && data.note.size() <= 300
         && data.createdAt is timestamp;
@@ -461,10 +477,14 @@ service cloud.firestore {
           'category',
           'transferId',
           'counterAccount',
+          'counterAccountId',
+          'counterAccountName',
           'reference',
           'amount',
           'paymentDate',
           'paymentMethod',
+          'accountId',
+          'accountName',
           'note',
           'createdAt'
         ])
@@ -484,6 +504,8 @@ service cloud.firestore {
         && data.counterAccount.size() >= 1
         && data.counterAccount.size() <= 30
         && data.counterAccount in ['Cash', 'Bank', 'Mobile Banking']
+        && (!('counterAccountId' in data) || isValidId(data.counterAccountId))
+        && (!('counterAccountName' in data) || (data.counterAccountName is string && data.counterAccountName.size() >= 1 && data.counterAccountName.size() <= 120))
         && data.reference is string
         && data.reference.size() >= 5
         && data.reference.size() <= 80
@@ -496,7 +518,12 @@ service cloud.firestore {
         && data.paymentMethod.size() >= 1
         && data.paymentMethod.size() <= 30
         && data.paymentMethod in ['Cash', 'Bank', 'Mobile Banking']
-        && data.paymentMethod != data.counterAccount
+        && (!('accountId' in data) || isValidId(data.accountId))
+        && (!('accountName' in data) || (data.accountName is string && data.accountName.size() >= 1 && data.accountName.size() <= 120))
+        && (
+          ('accountId' in data && 'counterAccountId' in data && data.accountId != data.counterAccountId)
+          || data.paymentMethod != data.counterAccount
+        )
         && data.note is string
         && data.note.size() <= 300
         && data.createdAt is timestamp;
@@ -654,6 +681,8 @@ service cloud.firestore {
           'amount',
           'paymentDate',
           'paymentMethod',
+          'accountId',
+          'accountName',
           'note',
           'createdAt'
         ])
@@ -671,8 +700,10 @@ service cloud.firestore {
         && data.paymentDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
         && data.paymentMethod is string
         && data.paymentMethod.size() >= 1
-        && data.paymentMethod.size() <= 20
-        && data.paymentMethod in ['Cash', 'Bank']
+        && data.paymentMethod.size() <= 30
+        && data.paymentMethod in ['Cash', 'Bank', 'Mobile Banking']
+        && (!('accountId' in data) || isValidId(data.accountId))
+        && (!('accountName' in data) || (data.accountName is string && data.accountName.size() >= 1 && data.accountName.size() <= 120))
         && data.note is string
         && data.note.size() <= 300
         && data.createdAt is timestamp;
@@ -699,6 +730,8 @@ service cloud.firestore {
           'amount',
           'paymentDate',
           'paymentMethod',
+          'accountId',
+          'accountName',
           'note',
           'createdAt'
         ])
@@ -716,8 +749,10 @@ service cloud.firestore {
         && data.paymentDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
         && data.paymentMethod is string
         && data.paymentMethod.size() >= 1
-        && data.paymentMethod.size() <= 20
-        && data.paymentMethod in ['Cash', 'Bank']
+        && data.paymentMethod.size() <= 30
+        && data.paymentMethod in ['Cash', 'Bank', 'Mobile Banking']
+        && (!('accountId' in data) || isValidId(data.accountId))
+        && (!('accountName' in data) || (data.accountName is string && data.accountName.size() >= 1 && data.accountName.size() <= 120))
         && data.note is string
         && data.note.size() <= 300
         && data.createdAt is timestamp;
@@ -746,6 +781,8 @@ service cloud.firestore {
           'amount',
           'paymentDate',
           'paymentMethod',
+          'accountId',
+          'accountName',
           'note',
           'createdAt'
         ])
@@ -766,8 +803,10 @@ service cloud.firestore {
         && data.paymentDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
         && data.paymentMethod is string
         && data.paymentMethod.size() >= 1
-        && data.paymentMethod.size() <= 20
-        && data.paymentMethod in ['Cash', 'Bank']
+        && data.paymentMethod.size() <= 30
+        && data.paymentMethod in ['Cash', 'Bank', 'Mobile Banking']
+        && (!('accountId' in data) || isValidId(data.accountId))
+        && (!('accountName' in data) || (data.accountName is string && data.accountName.size() >= 1 && data.accountName.size() <= 120))
         && data.note is string
         && data.note.size() <= 300
         && data.createdAt is timestamp;
@@ -796,6 +835,8 @@ service cloud.firestore {
           'amount',
           'paymentDate',
           'paymentMethod',
+          'accountId',
+          'accountName',
           'note',
           'createdAt'
         ])
@@ -816,8 +857,10 @@ service cloud.firestore {
         && data.paymentDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
         && data.paymentMethod is string
         && data.paymentMethod.size() >= 1
-        && data.paymentMethod.size() <= 20
-        && data.paymentMethod in ['Cash', 'Bank']
+        && data.paymentMethod.size() <= 30
+        && data.paymentMethod in ['Cash', 'Bank', 'Mobile Banking']
+        && (!('accountId' in data) || isValidId(data.accountId))
+        && (!('accountName' in data) || (data.accountName is string && data.accountName.size() >= 1 && data.accountName.size() <= 120))
         && data.note is string
         && data.note.size() <= 300
         && data.createdAt is timestamp;
@@ -842,6 +885,8 @@ service cloud.firestore {
           'amount',
           'paymentDate',
           'paymentMethod',
+          'accountId',
+          'accountName',
           'note',
           'createdAt'
         ])
@@ -862,6 +907,8 @@ service cloud.firestore {
         && data.paymentMethod.size() >= 1
         && data.paymentMethod.size() <= 30
         && data.paymentMethod in ['Cash', 'Bank', 'Mobile Banking']
+        && (!('accountId' in data) || isValidId(data.accountId))
+        && (!('accountName' in data) || (data.accountName is string && data.accountName.size() >= 1 && data.accountName.size() <= 120))
         && data.note is string
         && data.note.size() <= 300
         && data.createdAt is timestamp;
@@ -888,10 +935,14 @@ service cloud.firestore {
           'category',
           'transferId',
           'counterAccount',
+          'counterAccountId',
+          'counterAccountName',
           'reference',
           'amount',
           'paymentDate',
           'paymentMethod',
+          'accountId',
+          'accountName',
           'note',
           'createdAt'
         ])
@@ -911,6 +962,8 @@ service cloud.firestore {
         && data.counterAccount.size() >= 1
         && data.counterAccount.size() <= 30
         && data.counterAccount in ['Cash', 'Bank', 'Mobile Banking']
+        && (!('counterAccountId' in data) || isValidId(data.counterAccountId))
+        && (!('counterAccountName' in data) || (data.counterAccountName is string && data.counterAccountName.size() >= 1 && data.counterAccountName.size() <= 120))
         && data.reference is string
         && data.reference.size() >= 5
         && data.reference.size() <= 80
@@ -923,7 +976,12 @@ service cloud.firestore {
         && data.paymentMethod.size() >= 1
         && data.paymentMethod.size() <= 30
         && data.paymentMethod in ['Cash', 'Bank', 'Mobile Banking']
-        && data.paymentMethod != data.counterAccount
+        && (!('accountId' in data) || isValidId(data.accountId))
+        && (!('accountName' in data) || (data.accountName is string && data.accountName.size() >= 1 && data.accountName.size() <= 120))
+        && (
+          ('accountId' in data && 'counterAccountId' in data && data.accountId != data.counterAccountId)
+          || data.paymentMethod != data.counterAccount
+        )
         && data.note is string
         && data.note.size() <= 300
         && data.createdAt is timestamp;
@@ -950,6 +1008,8 @@ service cloud.firestore {
           'category',
           'amount',
           'paymentMethod',
+          'accountId',
+          'accountName',
           'description',
           'createdAt'
         ])
@@ -967,8 +1027,10 @@ service cloud.firestore {
         && isPositiveBoundedNumber(data.amount, 1000000000)
         && data.paymentMethod is string
         && data.paymentMethod.size() >= 1
-        && data.paymentMethod.size() <= 20
-        && data.paymentMethod in ['Cash', 'Bank']
+        && data.paymentMethod.size() <= 30
+        && data.paymentMethod in ['Cash', 'Bank', 'Mobile Banking']
+        && (!('accountId' in data) || isValidId(data.accountId))
+        && (!('accountName' in data) || (data.accountName is string && data.accountName.size() >= 1 && data.accountName.size() <= 120))
         && data.description is string
         && data.description.size() <= 300
         && data.createdAt is timestamp;
@@ -1362,13 +1424,9 @@ service cloud.firestore {
     // Collection: /allowed_users/{emailKey} (Invite-Only Email Allowlist — Managed by Admin)
     match /allowed_users/{emailKey} {
       allow get: if isVerifiedUser()
-        && isValidEmailKey(emailKey)
-        && (
-          (request.auth.token.email is string && request.auth.token.email.lower() == emailKey)
-          || isAdmin()
-        );
+        && isValidAllowedDocKey(emailKey);
 
-      allow list: if isAdmin();
+      allow list: if isVerifiedUser();
 
       allow create: if isVerifiedUser()
         && isValidEmailKey(emailKey)
@@ -1381,35 +1439,49 @@ service cloud.firestore {
         && (
           isAdmin()
           || (
-            // First-user bootstrap auto-registers first admin into allowed_users
             request.auth.token.email is string
-            && emailKey == request.auth.token.email.lower()
-            && incoming().role == 'admin'
-            && !exists(/databases/$(database)/documents/app_meta/bootstrap)
-            && existsAfter(/databases/$(database)/documents/app_meta/bootstrap)
-            && getAfter(/databases/$(database)/documents/app_meta/bootstrap).data.firstAdminUid == request.auth.uid
+            && emailKey == request.auth.token.email.trim().lower()
           )
         );
 
       allow update: if isVerifiedUser()
-        && isValidEmailKey(emailKey)
+        && isValidAllowedDocKey(emailKey)
         && isValidAllowedUser(incoming())
-        && isAdmin()
-        && incoming().email == existing().email
-        && incoming().createdAt == existing().createdAt
         && incoming().updatedAt == request.time
-        && incoming().diff(existing()).affectedKeys().hasOnly([
-          'role',
-          'invitedByUid',
-          'invitedByEmail',
-          'updatedAt'
-        ]);
+        && (
+          (
+            isAdmin()
+            && (!('createdAt' in existing()) || incoming().createdAt == existing().createdAt)
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'email',
+              'role',
+              'invitedByUid',
+              'invitedByEmail',
+              'createdAt',
+              'updatedAt'
+            ])
+          ) || (
+            request.auth.token.email is string
+            && emailKey == request.auth.token.email.trim().lower()
+            && incoming().email == emailKey
+            && (!('createdAt' in existing()) || incoming().createdAt == existing().createdAt)
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'email',
+              'role',
+              'invitedByUid',
+              'invitedByEmail',
+              'createdAt',
+              'updatedAt'
+            ])
+          )
+        );
 
       allow delete: if isVerifiedUser()
-        && isValidEmailKey(emailKey)
+        && isValidAllowedDocKey(emailKey)
         && isAdmin()
         && emailKey != 'hmmojjammalhoq@gmail.com'
-        && !(request.auth.token.email is string && emailKey == request.auth.token.email.lower());
+        && emailKey != 'ythoqe@gmail.com'
+        && !(request.auth.token.email is string && emailKey == request.auth.token.email.trim().lower());
     }
 
     // Collection: /users/{userId} (User Profiles & RBAC Roles — Restricted to Invited Users Only)
@@ -1434,6 +1506,11 @@ service cloud.firestore {
             // Invited User: email exists in allowed_users and role matches assigned role
             hasAllowedUserDoc()
             && incoming().role == getAllowedUserRole()
+          ) || (
+            // Invited User whose canonical allowed_users doc is written in the same batch
+            request.auth.token.email is string
+            && existsAfter(/databases/$(database)/documents/allowed_users/$(request.auth.token.email.trim().lower()))
+            && incoming().role == getAfter(/databases/$(database)/documents/allowed_users/$(request.auth.token.email.trim().lower())).data.role.trim().lower()
           ) || (
             // First User Rule OR Runtime Bootstrapped Admin
             incoming().role == 'admin'
@@ -1467,6 +1544,7 @@ service cloud.firestore {
             && (
               incoming().role == existing().role
               || (hasAllowedUserDoc() && incoming().role == getAllowedUserRole())
+              || (isBootstrappedAdmin() && incoming().role == 'admin')
             )
             && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'role', 'updatedAt'])
           )
@@ -2276,6 +2354,41 @@ service cloud.firestore {
         );
 
       allow delete: if false;
+    }
+
+    // Collection: /accounts/{accountId} (Custom Cash, Bank & Mobile Banking Accounts — Managed by Admin & Accountant)
+    match /accounts/{accountId} {
+      allow get: if isVerifiedUser()
+        && isValidId(accountId)
+        && isMillStaff();
+
+      allow list: if isMillStaff();
+
+      allow create: if isVerifiedUser()
+        && isValidId(accountId)
+        && isValidAccount(incoming())
+        && incoming().ownerId == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && isAdminOrAccountant();
+
+      allow update: if isVerifiedUser()
+        && isValidId(accountId)
+        && isValidAccount(incoming())
+        && isAdminOrAccountant()
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'accountName',
+          'accountType',
+          'openingBalance',
+          'updatedAt'
+        ]);
+
+      allow delete: if isVerifiedUser()
+        && isValidId(accountId)
+        && isAdmin();
     }
   }
 }

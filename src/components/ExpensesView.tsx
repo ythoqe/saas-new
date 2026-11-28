@@ -9,6 +9,7 @@ import {
   Receipt,
   RotateCcw,
   Search,
+  Smartphone,
   TrendingDown,
 } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -17,11 +18,16 @@ import {
   EXPENSE_CATEGORIES,
   EXPENSE_PAYMENT_METHODS,
   EXPENSE_VALIDATION,
+  type AccountRecord,
   type ExpenseCategory,
   type ExpensePaymentMethod,
   type ExpenseRecord,
   type MoneyOutRecord,
 } from '../types/mill';
+import {
+  getEffectiveAccounts,
+  resolveTransactionAccount,
+} from '../utils/accounts';
 import {
   formatCurrency,
   formatIsoDate,
@@ -32,6 +38,7 @@ import {
 
 interface ExpensesViewProps {
   ownerId: string;
+  accounts: AccountRecord[];
   expenses: ExpenseRecord[];
   moneyOutRecords: MoneyOutRecord[];
   isLoading: boolean;
@@ -73,6 +80,7 @@ function getIsoDateFallbackMs(isoDate: string): number {
 
 export function ExpensesView({
   ownerId,
+  accounts,
   expenses,
   moneyOutRecords,
   isLoading,
@@ -81,6 +89,11 @@ export function ExpensesView({
   onCorrectMoneyOut,
 }: ExpensesViewProps) {
   const { t, translateExpenseCategory, translatePaymentMethod } = useLanguage();
+  const effectiveAccounts = useMemo(
+    () => getEffectiveAccounts(accounts, ownerId),
+    [accounts, ownerId]
+  );
+
   const todayIso = getTodayIsoDate();
   const currentYearMonth = todayIso.slice(0, 7);
   const currentMonthLabel = useMemo(
@@ -92,11 +105,23 @@ export function ExpensesView({
   const [expenseDate, setExpenseDate] = useState(() => getTodayIsoDate());
   const [category, setCategory] = useState<ExpenseCategory>('Salary');
   const [amountInput, setAmountInput] = useState('');
-  const [paymentMethod, setPaymentMethod] =
-    useState<ExpensePaymentMethod>('Cash');
+  const [selectedAccountId, setSelectedAccountId] = useState<string>('');
   const [description, setDescription] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (
+      !selectedAccountId ||
+      !effectiveAccounts.some((acc) => acc.id === selectedAccountId)
+    ) {
+      setSelectedAccountId(effectiveAccounts[0]?.id ?? '');
+    }
+  }, [effectiveAccounts, selectedAccountId]);
+
+  const selectedAccount =
+    effectiveAccounts.find((acc) => acc.id === selectedAccountId) ??
+    effectiveAccounts[0];
 
   // Expense list filters
   const [searchQuery, setSearchQuery] = useState('');
@@ -121,11 +146,6 @@ export function ExpensesView({
     parsedAmount > 0 &&
     parsedAmount <= EXPENSE_VALIDATION.maxAmount;
   const cleanAmount = isValidAmount ? roundCurrency(parsedAmount) : null;
-
-  const methodIcons: Record<ExpensePaymentMethod, typeof Banknote> = {
-    Cash: Banknote,
-    Bank: Building2,
-  };
 
   // Real-time KPIs & category breakdown
   const stats = useMemo(() => {
@@ -255,8 +275,8 @@ export function ExpensesView({
       return;
     }
 
-    if (!EXPENSE_PAYMENT_METHODS.includes(paymentMethod)) {
-      setFormError('Please choose Cash or Bank as payment method.');
+    if (!selectedAccount) {
+      setFormError('Please select a payment account.');
       return;
     }
 
@@ -287,12 +307,14 @@ export function ExpensesView({
         expenseDate,
         category,
         amount: cleanAmount,
-        paymentMethod,
+        paymentMethod: selectedAccount.accountType,
+        accountId: selectedAccount.id,
+        accountName: selectedAccount.accountName,
         description: trimmedDescription,
         createdAt: serverTimestamp(),
       });
 
-      // 2. Atomically insert matching outflow in money_out so Net Cash Balance updates immediately
+      // 2. Atomically insert matching outflow in money_out linked to specific accountId
       batch.set(moneyOutDocRef, {
         ownerId,
         expenseId: expenseRef,
@@ -300,7 +322,9 @@ export function ExpensesView({
         reference: expenseRef,
         amount: cleanAmount,
         paymentDate: expenseDate,
-        paymentMethod,
+        paymentMethod: selectedAccount.accountType,
+        accountId: selectedAccount.id,
+        accountName: selectedAccount.accountName,
         note: trimmedDescription,
         createdAt: serverTimestamp(),
       });
@@ -317,7 +341,12 @@ export function ExpensesView({
 
       setAmountInput('');
       setDescription('');
-      onExpenseCreated(expenseRef, category, cleanAmount, paymentMethod);
+      onExpenseCreated(
+        expenseRef,
+        category,
+        cleanAmount,
+        selectedAccount.accountType
+      );
     } catch (error) {
       setFormError(
         error instanceof Error
@@ -522,37 +551,28 @@ export function ExpensesView({
               </div>
             </div>
 
-            {/* Payment Method (Cash / Bank) */}
+            {/* Dynamic Account / Payment Method Dropdown */}
             <div>
-              <span className="block text-sm font-medium text-slate-700 mb-1.5">
+              <label
+                htmlFor="expenseAccount"
+                className="block text-sm font-medium text-slate-700 mb-1.5"
+              >
                 {t('expenses.form.paymentMethod')}{' '}
                 <span className="text-red-600">*</span>
-              </span>
-              <div
-                role="group"
-                aria-label="Expense payment method"
-                className="grid grid-cols-2 gap-2.5"
+              </label>
+              <select
+                id="expenseAccount"
+                required
+                value={selectedAccount?.id ?? ''}
+                onChange={(e) => setSelectedAccountId(e.target.value)}
+                className="w-full px-3.5 py-2.5 text-sm text-slate-900 bg-white border border-slate-300 rounded-md focus:outline-none focus:border-[#1e3a8a] focus:ring-1 focus:ring-[#1e3a8a]"
               >
-                {EXPENSE_PAYMENT_METHODS.map((method) => {
-                  const Icon = methodIcons[method];
-                  const selected = paymentMethod === method;
-                  return (
-                    <button
-                      key={method}
-                      type="button"
-                      onClick={() => setPaymentMethod(method)}
-                      className={`flex items-center justify-center gap-2 px-3 py-2.5 text-xs font-medium rounded-md border transition-colors cursor-pointer whitespace-nowrap ${
-                        selected
-                          ? 'bg-[#1e3a8a] text-white border-[#1e3a8a]'
-                          : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
-                      }`}
-                    >
-                      <Icon className="w-3.5 h-3.5 shrink-0" />
-                      <span>{translatePaymentMethod(method)}</span>
-                    </button>
-                  );
-                })}
-              </div>
+                {effectiveAccounts.map((acc) => (
+                  <option key={acc.id} value={acc.id}>
+                    {acc.accountName} ({acc.accountType})
+                  </option>
+                ))}
+              </select>
             </div>
 
             {/* Description / Note */}
@@ -814,6 +834,20 @@ export function ExpensesView({
                             m.expenseId === exp.id ||
                             m.reference === exp.reference
                         ) ?? null;
+                      const resolvedAccount = resolveTransactionAccount(
+                        {
+                          accountId: exp.accountId ?? linkedMoneyOut?.accountId,
+                          accountName:
+                            exp.accountName ?? linkedMoneyOut?.accountName,
+                          paymentMethod: exp.paymentMethod,
+                        },
+                        effectiveAccounts
+                      );
+                      const accountDisplayLabel =
+                        resolvedAccount?.accountName ??
+                        exp.accountName ??
+                        translatePaymentMethod(exp.paymentMethod);
+
                       return (
                         <tr
                           key={exp.id}
@@ -844,10 +878,12 @@ export function ExpensesView({
                             <span className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-700">
                               {exp.paymentMethod === 'Bank' ? (
                                 <Building2 className="w-3.5 h-3.5 text-slate-400" />
+                              ) : exp.paymentMethod === 'Mobile Banking' ? (
+                                <Smartphone className="w-3.5 h-3.5 text-slate-400" />
                               ) : (
                                 <Banknote className="w-3.5 h-3.5 text-slate-400" />
                               )}
-                              {translatePaymentMethod(exp.paymentMethod)}
+                              {accountDisplayLabel}
                             </span>
                           </td>
                           <td className="py-3.5 px-4 text-right font-mono text-sm font-semibold tabular-nums text-red-700 whitespace-nowrap">

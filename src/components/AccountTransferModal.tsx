@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { doc, serverTimestamp, writeBatch } from 'firebase/firestore';
 import {
   AlertTriangle,
@@ -11,10 +11,11 @@ import {
 } from 'lucide-react';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import {
-  PAYMENT_METHODS,
   PAYMENT_VALIDATION,
+  type AccountRecord,
   type PaymentMethod,
 } from '../types/mill';
+import { getEffectiveAccounts } from '../utils/accounts';
 import {
   formatCurrency,
   getTodayIsoDate,
@@ -24,22 +25,17 @@ import {
 interface AccountTransferModalProps {
   open: boolean;
   ownerId: string;
-  initialFromAccount?: PaymentMethod;
-  balances: Record<PaymentMethod, number>;
+  accounts: AccountRecord[];
+  initialFromAccountId?: string;
+  balancesByAccountId: Record<string, number>;
   onClose: () => void;
   onSuccess: (
-    fromAccount: PaymentMethod,
-    toAccount: PaymentMethod,
+    fromAccountName: string,
+    toAccountName: string,
     amount: number,
     transferRef: string
   ) => void;
 }
-
-const ACCOUNT_LABELS: Record<PaymentMethod, string> = {
-  Cash: 'Main Cash',
-  Bank: 'Bank Account',
-  'Mobile Banking': 'Mobile Banking',
-};
 
 function generateTransferId(dateIso: string): string {
   const compact = dateIso.replaceAll('-', '');
@@ -47,31 +43,28 @@ function generateTransferId(dateIso: string): string {
   return `TRF-${compact}-${randomSuffix}`;
 }
 
-function getDefaultDestination(from: PaymentMethod): PaymentMethod {
-  if (from === 'Cash') return 'Bank';
-  if (from === 'Bank') return 'Cash';
-  return 'Cash';
-}
-
-function getAccountIcon(account: PaymentMethod) {
-  if (account === 'Cash') return Wallet;
-  if (account === 'Bank') return Landmark;
+function getAccountIcon(accountType: PaymentMethod) {
+  if (accountType === 'Cash') return Wallet;
+  if (accountType === 'Bank') return Landmark;
   return Smartphone;
 }
 
 export function AccountTransferModal({
   open,
   ownerId,
-  initialFromAccount = 'Cash',
-  balances,
+  accounts,
+  initialFromAccountId,
+  balancesByAccountId,
   onClose,
   onSuccess,
 }: AccountTransferModalProps) {
-  const [fromAccount, setFromAccount] =
-    useState<PaymentMethod>(initialFromAccount);
-  const [toAccount, setToAccount] = useState<PaymentMethod>(
-    getDefaultDestination(initialFromAccount)
+  const effectiveAccounts = useMemo(
+    () => getEffectiveAccounts(accounts, ownerId),
+    [accounts, ownerId]
   );
+
+  const [fromAccountId, setFromAccountId] = useState<string>('');
+  const [toAccountId, setToAccountId] = useState<string>('');
   const [amountInput, setAmountInput] = useState('');
   const [transferDate, setTransferDate] = useState(() => getTodayIsoDate());
   const [note, setNote] = useState('');
@@ -80,14 +73,21 @@ export function AccountTransferModal({
 
   useEffect(() => {
     if (!open) return;
-    setFromAccount(initialFromAccount);
-    setToAccount(getDefaultDestination(initialFromAccount));
+    const defaultFrom =
+      effectiveAccounts.find((a) => a.id === initialFromAccountId)?.id ??
+      effectiveAccounts[0]?.id ??
+      '';
+    const defaultTo =
+      effectiveAccounts.find((a) => a.id !== defaultFrom)?.id ?? defaultFrom;
+
+    setFromAccountId(defaultFrom);
+    setToAccountId(defaultTo);
     setAmountInput('');
     setTransferDate(getTodayIsoDate());
     setNote('');
     setErrorMessage(null);
     setSubmitting(false);
-  }, [open, initialFromAccount]);
+  }, [open, initialFromAccountId, effectiveAccounts]);
 
   useEffect(() => {
     if (!open) return;
@@ -102,37 +102,49 @@ export function AccountTransferModal({
 
   if (!open) return null;
 
+  const fromAccount =
+    effectiveAccounts.find((a) => a.id === fromAccountId) ??
+    effectiveAccounts[0];
+  const toAccount =
+    effectiveAccounts.find((a) => a.id === toAccountId) ??
+    effectiveAccounts[1] ??
+    effectiveAccounts[0];
+
   const parsedAmount = Number(amountInput);
   const validAmount =
     Number.isFinite(parsedAmount) && parsedAmount > 0
       ? roundCurrency(parsedAmount)
       : 0;
 
-  const currentFromBalance = balances[fromAccount] ?? 0;
-  const currentToBalance = balances[toAccount] ?? 0;
+  const currentFromBalance = fromAccount
+    ? balancesByAccountId[fromAccount.id] ?? 0
+    : 0;
+  const currentToBalance = toAccount
+    ? balancesByAccountId[toAccount.id] ?? 0
+    : 0;
   const projectedFromBalance = roundCurrency(currentFromBalance - validAmount);
   const projectedToBalance = roundCurrency(currentToBalance + validAmount);
   const exceedsAvailable = validAmount > currentFromBalance;
 
-  const handleFromChange = (nextFrom: PaymentMethod) => {
-    setFromAccount(nextFrom);
-    if (nextFrom === toAccount) {
-      setToAccount(fromAccount);
+  const handleFromChange = (nextFromId: string) => {
+    setFromAccountId(nextFromId);
+    if (nextFromId === toAccountId) {
+      setToAccountId(fromAccountId);
     }
     setErrorMessage(null);
   };
 
-  const handleToChange = (nextTo: PaymentMethod) => {
-    setToAccount(nextTo);
-    if (nextTo === fromAccount) {
-      setFromAccount(toAccount);
+  const handleToChange = (nextToId: string) => {
+    setToAccountId(nextToId);
+    if (nextToId === fromAccountId) {
+      setFromAccountId(toAccountId);
     }
     setErrorMessage(null);
   };
 
   const handleSwap = () => {
-    setFromAccount(toAccount);
-    setToAccount(fromAccount);
+    setFromAccountId(toAccountId);
+    setToAccountId(fromAccountId);
     setErrorMessage(null);
   };
 
@@ -140,7 +152,12 @@ export function AccountTransferModal({
     e.preventDefault();
     setErrorMessage(null);
 
-    if (fromAccount === toAccount) {
+    if (!fromAccount || !toAccount) {
+      setErrorMessage('Please select both source and destination accounts.');
+      return;
+    }
+
+    if (fromAccount.id === toAccount.id) {
       setErrorMessage('Source and destination accounts must be different.');
       return;
     }
@@ -167,14 +184,14 @@ export function AccountTransferModal({
 
     const outNote = (
       trimmedNote
-        ? `Transfer to ${ACCOUNT_LABELS[toAccount]} — ${trimmedNote}`
-        : `Transfer to ${ACCOUNT_LABELS[toAccount]}`
+        ? `Transfer to ${toAccount.accountName} — ${trimmedNote}`
+        : `Transfer to ${toAccount.accountName}`
     ).slice(0, PAYMENT_VALIDATION.noteMax);
 
     const inNote = (
       trimmedNote
-        ? `Transfer from ${ACCOUNT_LABELS[fromAccount]} — ${trimmedNote}`
-        : `Transfer from ${ACCOUNT_LABELS[fromAccount]}`
+        ? `Transfer from ${fromAccount.accountName} — ${trimmedNote}`
+        : `Transfer from ${fromAccount.accountName}`
     ).slice(0, PAYMENT_VALIDATION.noteMax);
 
     setSubmitting(true);
@@ -188,11 +205,15 @@ export function AccountTransferModal({
         source: 'transfer',
         category: 'Transfer',
         transferId: transferRef,
-        counterAccount: toAccount,
+        accountId: fromAccount.id,
+        accountName: fromAccount.accountName,
+        counterAccountId: toAccount.id,
+        counterAccountName: toAccount.accountName,
+        counterAccount: toAccount.accountType,
         reference: transferRef,
         amount: cleanAmount,
         paymentDate: transferDate,
-        paymentMethod: fromAccount,
+        paymentMethod: fromAccount.accountType,
         note: outNote,
         createdAt: serverTimestamp(),
       });
@@ -202,17 +223,26 @@ export function AccountTransferModal({
         source: 'transfer',
         category: 'Transfer',
         transferId: transferRef,
-        counterAccount: fromAccount,
+        accountId: toAccount.id,
+        accountName: toAccount.accountName,
+        counterAccountId: fromAccount.id,
+        counterAccountName: fromAccount.accountName,
+        counterAccount: fromAccount.accountType,
         reference: transferRef,
         amount: cleanAmount,
         paymentDate: transferDate,
-        paymentMethod: toAccount,
+        paymentMethod: toAccount.accountType,
         note: inNote,
         createdAt: serverTimestamp(),
       });
 
       await batch.commit();
-      onSuccess(fromAccount, toAccount, cleanAmount, transferRef);
+      onSuccess(
+        fromAccount.accountName,
+        toAccount.accountName,
+        cleanAmount,
+        transferRef
+      );
     } catch (err) {
       try {
         handleFirestoreError(
@@ -231,8 +261,8 @@ export function AccountTransferModal({
     }
   };
 
-  const FromIcon = getAccountIcon(fromAccount);
-  const ToIcon = getAccountIcon(toAccount);
+  const FromIcon = getAccountIcon(fromAccount?.accountType ?? 'Cash');
+  const ToIcon = getAccountIcon(toAccount?.accountType ?? 'Bank');
 
   return (
     <div
@@ -264,7 +294,8 @@ export function AccountTransferModal({
                 Account Transfer
               </h2>
               <p className="text-[11px] text-slate-300">
-                Move funds atomically between Main Cash, Bank, and Mobile Banking
+                Move funds atomically between your Cash, Bank, and Mobile
+                Banking accounts
               </p>
             </div>
           </div>
@@ -290,7 +321,7 @@ export function AccountTransferModal({
             </div>
           )}
 
-          {/* From / Swap / To Account Selector */}
+          {/* From / Swap / To Account Selector (Dynamic Accounts Dropdown) */}
           <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto_1fr] items-end gap-3">
             <div>
               <label
@@ -301,16 +332,14 @@ export function AccountTransferModal({
               </label>
               <select
                 id="transfer-from-account"
-                value={fromAccount}
-                onChange={(e) =>
-                  handleFromChange(e.target.value as PaymentMethod)
-                }
+                value={fromAccount?.id ?? ''}
+                onChange={(e) => handleFromChange(e.target.value)}
                 disabled={submitting}
                 className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-md text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#1e3a8a]/20 focus:border-[#1e3a8a]"
               >
-                {PAYMENT_METHODS.map((method) => (
-                  <option key={method} value={method}>
-                    {ACCOUNT_LABELS[method]}
+                {effectiveAccounts.map((acc) => (
+                  <option key={acc.id} value={acc.id}>
+                    {acc.accountName} ({acc.accountType})
                   </option>
                 ))}
               </select>
@@ -347,16 +376,14 @@ export function AccountTransferModal({
               </label>
               <select
                 id="transfer-to-account"
-                value={toAccount}
-                onChange={(e) =>
-                  handleToChange(e.target.value as PaymentMethod)
-                }
+                value={toAccount?.id ?? ''}
+                onChange={(e) => handleToChange(e.target.value)}
                 disabled={submitting}
                 className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-md text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#1e3a8a]/20 focus:border-[#1e3a8a]"
               >
-                {PAYMENT_METHODS.map((method) => (
-                  <option key={method} value={method}>
-                    {ACCOUNT_LABELS[method]}
+                {effectiveAccounts.map((acc) => (
+                  <option key={acc.id} value={acc.id}>
+                    {acc.accountName} ({acc.accountType})
                   </option>
                 ))}
               </select>
@@ -429,7 +456,7 @@ export function AccountTransferModal({
               id="transfer-note"
               type="text"
               maxLength={240}
-              placeholder="e.g., Cash deposited to Sonali Bank or bKash withdrawal"
+              placeholder="e.g., Cash deposited to City Bank or bKash settlement"
               value={note}
               onChange={(e) => setNote(e.target.value)}
               disabled={submitting}
@@ -445,8 +472,10 @@ export function AccountTransferModal({
             <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 text-xs">
               <div className="bg-white border border-slate-200 rounded-md p-2.5">
                 <div className="flex items-center gap-1.5 text-slate-600 font-medium">
-                  <FromIcon className="w-3.5 h-3.5 text-slate-400" />
-                  <span>{ACCOUNT_LABELS[fromAccount]}</span>
+                  <FromIcon className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                  <span className="truncate">
+                    {fromAccount?.accountName ?? 'Source'}
+                  </span>
                 </div>
                 <p
                   className={`mt-1 text-sm font-bold tabular-nums ${
@@ -468,12 +497,16 @@ export function AccountTransferModal({
 
               <div className="bg-white border border-slate-200 rounded-md p-2.5">
                 <div className="flex items-center gap-1.5 text-slate-600 font-medium">
-                  <ToIcon className="w-3.5 h-3.5 text-slate-400" />
-                  <span>{ACCOUNT_LABELS[toAccount]}</span>
+                  <ToIcon className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                  <span className="truncate">
+                    {toAccount?.accountName ?? 'Destination'}
+                  </span>
                 </div>
                 <p
                   className={`mt-1 text-sm font-bold tabular-nums ${
-                    projectedToBalance >= 0 ? 'text-emerald-700' : 'text-red-700'
+                    projectedToBalance >= 0
+                      ? 'text-emerald-700'
+                      : 'text-red-700'
                   }`}
                 >
                   {formatCurrency(projectedToBalance)}
@@ -486,12 +519,13 @@ export function AccountTransferModal({
               </div>
             </div>
 
-            {exceedsAvailable && (
+            {exceedsAvailable && fromAccount && (
               <div className="flex items-start gap-2 pt-1 text-[11px] text-amber-800">
                 <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
                 <span>
-                  Transfer exceeds current {ACCOUNT_LABELS[fromAccount]} balance
-                  and will leave it negative ({formatCurrency(projectedFromBalance)}).
+                  Transfer exceeds current {fromAccount.accountName} balance and
+                  will leave it negative ({formatCurrency(projectedFromBalance)}
+                  ).
                 </span>
               </div>
             )}
@@ -509,7 +543,13 @@ export function AccountTransferModal({
             </button>
             <button
               type="submit"
-              disabled={submitting || validAmount <= 0 || fromAccount === toAccount}
+              disabled={
+                submitting ||
+                validAmount <= 0 ||
+                !fromAccount ||
+                !toAccount ||
+                fromAccount.id === toAccount.id
+              }
               className="inline-flex items-center gap-2 px-4 py-2 text-xs sm:text-sm font-semibold text-white bg-[#1e3a8a] hover:bg-[#1e40af] rounded-md transition-colors cursor-pointer disabled:opacity-50"
             >
               <ArrowLeftRight className="w-4 h-4" />

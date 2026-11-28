@@ -1,9 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { collection, doc, serverTimestamp, writeBatch } from 'firebase/firestore';
 import {
   AlertTriangle,
-  Banknote,
-  Building2,
   HandCoins,
   X,
 } from 'lucide-react';
@@ -11,9 +9,11 @@ import { db, handleFirestoreError, OperationType } from '../firebase';
 import {
   ADVANCE_PAYMENT_METHODS,
   ADVANCE_VALIDATION,
+  type AccountRecord,
   type AdvancePaymentMethod,
   type EmployeeRecord,
 } from '../types/mill';
+import { getEffectiveAccounts } from '../utils/accounts';
 import {
   formatCurrency,
   getTodayIsoDate,
@@ -25,6 +25,7 @@ interface GiveAdvanceModalProps {
   monthAdvanceSoFar: number;
   currentMonthLabel: string;
   ownerId: string;
+  accounts: AccountRecord[];
   onClose: () => void;
   onAdvanceGiven: (
     employee: EmployeeRecord,
@@ -39,13 +40,20 @@ export function GiveAdvanceModal({
   monthAdvanceSoFar,
   currentMonthLabel,
   ownerId,
+  accounts,
   onClose,
   onAdvanceGiven,
 }: GiveAdvanceModalProps) {
+  const effectiveAccounts = useMemo(
+    () => getEffectiveAccounts(accounts, ownerId),
+    [accounts, ownerId]
+  );
+
   const [amountInput, setAmountInput] = useState('');
   const [advanceDate, setAdvanceDate] = useState(() => getTodayIsoDate());
-  const [paymentMethod, setPaymentMethod] =
-    useState<AdvancePaymentMethod>('Cash');
+  const [selectedAccountId, setSelectedAccountId] = useState<string>(
+    () => effectiveAccounts[0]?.id ?? 'default_cash'
+  );
   const [note, setNote] = useState('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -54,11 +62,11 @@ export function GiveAdvanceModal({
     if (employee) {
       setAmountInput('');
       setAdvanceDate(getTodayIsoDate());
-      setPaymentMethod('Cash');
+      setSelectedAccountId(effectiveAccounts[0]?.id ?? 'default_cash');
       setNote('');
       setErrorMsg(null);
     }
-  }, [employee]);
+  }, [employee, effectiveAccounts]);
 
   useEffect(() => {
     if (!employee) return;
@@ -72,6 +80,12 @@ export function GiveAdvanceModal({
   }, [employee, isSubmitting, onClose]);
 
   if (!employee) return null;
+
+  const selectedAccount =
+    effectiveAccounts.find((acc) => acc.id === selectedAccountId) ??
+    effectiveAccounts[0];
+  const paymentMethod: AdvancePaymentMethod =
+    selectedAccount?.accountType ?? 'Cash';
 
   const currentYearMonth = getTodayIsoDate().slice(0, 7);
   const isCurrentMonthDate = advanceDate.startsWith(currentYearMonth);
@@ -92,11 +106,6 @@ export function GiveAdvanceModal({
   );
   const exceedsSalary = projectedRemainingSalary < 0;
 
-  const methodIcons: Record<AdvancePaymentMethod, typeof Banknote> = {
-    Cash: Banknote,
-    Bank: Building2,
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
@@ -113,8 +122,8 @@ export function GiveAdvanceModal({
       return;
     }
 
-    if (!ADVANCE_PAYMENT_METHODS.includes(paymentMethod)) {
-      setErrorMsg('Please select Cash or Bank as payment method.');
+    if (!selectedAccount || !ADVANCE_PAYMENT_METHODS.includes(paymentMethod)) {
+      setErrorMsg('Please select a valid payment account.');
       return;
     }
 
@@ -157,7 +166,7 @@ export function GiveAdvanceModal({
         createdAt: serverTimestamp(),
       });
 
-      // 2. Atomically record outflow in money_out so Net Cash Balance decreases immediately
+      // 2. Atomically record outflow in money_out linked to selected accountId
       batch.set(moneyOutDocRef, {
         ownerId,
         employeeId: employee.id,
@@ -167,6 +176,8 @@ export function GiveAdvanceModal({
         amount: cleanAmount,
         paymentDate: advanceDate,
         paymentMethod,
+        accountId: selectedAccount.id,
+        accountName: selectedAccount.accountName,
         note: moneyOutNote.slice(0, ADVANCE_VALIDATION.noteMax),
         createdAt: serverTimestamp(),
       });
@@ -314,36 +325,28 @@ export function GiveAdvanceModal({
             />
           </div>
 
-          {/* Payment Method */}
+          {/* Payment Method / Account (Dynamic Dropdown from accounts collection) */}
           <div>
-            <span className="block text-sm font-medium text-slate-700 mb-1.5">
-              Payment Method <span className="text-red-600">*</span>
-            </span>
-            <div
-              role="group"
-              aria-label="Advance payment method"
-              className="grid grid-cols-2 gap-2.5"
+            <label
+              htmlFor="advanceAccountSelect"
+              className="block text-sm font-medium text-slate-700 mb-1.5"
             >
-              {ADVANCE_PAYMENT_METHODS.map((method) => {
-                const Icon = methodIcons[method];
-                const selected = paymentMethod === method;
-                return (
-                  <button
-                    key={method}
-                    type="button"
-                    onClick={() => setPaymentMethod(method)}
-                    className={`flex items-center justify-center gap-2 px-3 py-2 text-xs font-medium rounded-md border transition-colors cursor-pointer whitespace-nowrap ${
-                      selected
-                        ? 'bg-[#1e3a8a] text-white border-[#1e3a8a]'
-                        : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
-                    }`}
-                  >
-                    <Icon className="w-3.5 h-3.5 shrink-0" />
-                    <span>{method}</span>
-                  </button>
-                );
-              })}
-            </div>
+              Payment Method / Account <span className="text-red-600">*</span>
+            </label>
+            <select
+              id="advanceAccountSelect"
+              required
+              value={selectedAccount?.id ?? selectedAccountId}
+              onChange={(e) => setSelectedAccountId(e.target.value)}
+              disabled={isSubmitting}
+              className="w-full px-3.5 py-2.5 text-sm font-medium text-slate-900 bg-white border border-slate-300 rounded-md focus:outline-none focus:border-[#1e3a8a] focus:ring-1 focus:ring-[#1e3a8a]"
+            >
+              {effectiveAccounts.map((acc) => (
+                <option key={acc.id} value={acc.id}>
+                  {acc.accountName} ({acc.accountType})
+                </option>
+              ))}
+            </select>
           </div>
 
           {/* Note */}

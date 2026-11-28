@@ -1,20 +1,21 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { collection, doc, serverTimestamp, writeBatch } from 'firebase/firestore';
-import { Banknote, Building2, Smartphone, X } from 'lucide-react';
+import { Banknote, X } from 'lucide-react';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import {
   LEDGER_VALIDATION,
-  PAYMENT_METHODS,
   PAYMENT_VALIDATION,
+  type AccountRecord,
   type ClientRecord,
-  type PaymentMethod,
 } from '../types/mill';
+import { getEffectiveAccounts } from '../utils/accounts';
 import { formatCurrency, getTodayIsoDate, roundCurrency } from '../utils/ledger';
 
 interface ReceivePaymentModalProps {
   client: ClientRecord | null;
   currentClientDue: number;
   ownerId: string;
+  accounts: AccountRecord[];
   onClose: () => void;
   onPaymentReceived: (
     client: ClientRecord,
@@ -27,12 +28,18 @@ export function ReceivePaymentModal({
   client,
   currentClientDue,
   ownerId,
+  accounts,
   onClose,
   onPaymentReceived,
 }: ReceivePaymentModalProps) {
+  const effectiveAccounts = useMemo(
+    () => getEffectiveAccounts(accounts, ownerId),
+    [accounts, ownerId]
+  );
+
   const [amountInput, setAmountInput] = useState('');
   const [paymentDate, setPaymentDate] = useState(() => getTodayIsoDate());
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('Cash');
+  const [selectedAccountId, setSelectedAccountId] = useState<string>('');
   const [referenceNote, setReferenceNote] = useState('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -41,13 +48,17 @@ export function ReceivePaymentModal({
     if (client) {
       setAmountInput('');
       setPaymentDate(getTodayIsoDate());
-      setPaymentMethod('Cash');
+      setSelectedAccountId(effectiveAccounts[0]?.id ?? '');
       setReferenceNote('');
       setErrorMessage(null);
     }
-  }, [client]);
+  }, [client, effectiveAccounts]);
 
   if (!client) return null;
+
+  const selectedAccount =
+    effectiveAccounts.find((a) => a.id === selectedAccountId) ??
+    effectiveAccounts[0];
 
   const parsedAmount = Number(amountInput);
   const isValidAmount =
@@ -59,12 +70,6 @@ export function ReceivePaymentModal({
     cleanAmount !== null
       ? roundCurrency(currentClientDue - cleanAmount)
       : currentClientDue;
-
-  const methodIcons: Record<PaymentMethod, typeof Banknote> = {
-    Cash: Banknote,
-    Bank: Building2,
-    'Mobile Banking': Smartphone,
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -82,8 +87,8 @@ export function ReceivePaymentModal({
       return;
     }
 
-    if (!PAYMENT_METHODS.includes(paymentMethod)) {
-      setErrorMessage('Please choose a valid payment method.');
+    if (!selectedAccount) {
+      setErrorMessage('Please select a valid payment account.');
       return;
     }
 
@@ -101,9 +106,10 @@ export function ReceivePaymentModal({
       .toUpperCase();
     const paymentRef = `PAY-${rawAutoId}`;
 
+    const accountLabel = `${selectedAccount.accountName} (${selectedAccount.accountType})`;
     const combinedLedgerNote = trimmedNote
-      ? `${paymentMethod} (${paymentDate}) — ${trimmedNote}`
-      : `${paymentMethod} payment received (${paymentDate})`;
+      ? `${accountLabel} (${paymentDate}) — ${trimmedNote}`
+      : `${accountLabel} payment received (${paymentDate})`;
     const safeLedgerNote = combinedLedgerNote.slice(0, LEDGER_VALIDATION.noteMax);
 
     setIsSubmitting(true);
@@ -124,7 +130,7 @@ export function ReceivePaymentModal({
         createdAt: serverTimestamp(),
       });
 
-      // 2. Paired cash/bank/mobile-banking inflow document in money_in
+      // 2. Paired inflow document in money_in linked to specific accountId
       batch.set(moneyInRef, {
         ownerId,
         clientId: client.id,
@@ -132,7 +138,9 @@ export function ReceivePaymentModal({
         reference: paymentRef,
         amount: cleanAmount,
         paymentDate,
-        paymentMethod,
+        paymentMethod: selectedAccount.accountType,
+        accountId: selectedAccount.id,
+        accountName: selectedAccount.accountName,
         note: trimmedNote,
         createdAt: serverTimestamp(),
       });
@@ -292,36 +300,28 @@ export function ReceivePaymentModal({
               </div>
             </div>
 
-            {/* Payment Method */}
+            {/* Dynamic Account / Payment Method Dropdown */}
             <div>
-              <span className="block text-sm font-medium text-slate-700 mb-1.5">
-                Payment Method <span className="text-red-600">*</span>
-              </span>
-              <div
-                role="group"
-                aria-label="Payment method"
-                className="grid grid-cols-3 gap-2"
+              <label
+                htmlFor="receive-payment-account"
+                className="block text-sm font-medium text-slate-700 mb-1.5"
               >
-                {PAYMENT_METHODS.map((method) => {
-                  const Icon = methodIcons[method];
-                  const selected = paymentMethod === method;
-                  return (
-                    <button
-                      key={method}
-                      type="button"
-                      onClick={() => setPaymentMethod(method)}
-                      className={`flex items-center justify-center gap-2 px-3 py-2.5 text-xs font-medium rounded-md border transition-colors cursor-pointer whitespace-nowrap ${
-                        selected
-                          ? 'bg-[#1e3a8a] text-white border-[#1e3a8a]'
-                          : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
-                      }`}
-                    >
-                      <Icon className="w-3.5 h-3.5 shrink-0" />
-                      <span>{method}</span>
-                    </button>
-                  );
-                })}
-              </div>
+                Deposit To Account / Payment Method{' '}
+                <span className="text-red-600">*</span>
+              </label>
+              <select
+                id="receive-payment-account"
+                required
+                value={selectedAccount?.id ?? ''}
+                onChange={(e) => setSelectedAccountId(e.target.value)}
+                className="w-full px-3.5 py-2.5 text-sm text-slate-900 bg-white border border-slate-300 rounded-md focus:outline-none focus:border-[#1e3a8a] focus:ring-1 focus:ring-[#1e3a8a]"
+              >
+                {effectiveAccounts.map((acc) => (
+                  <option key={acc.id} value={acc.id}>
+                    {acc.accountName} ({acc.accountType})
+                  </option>
+                ))}
+              </select>
             </div>
 
             {/* Reference Note */}
@@ -339,10 +339,10 @@ export function ReceivePaymentModal({
                 value={referenceNote}
                 onChange={(e) => setReferenceNote(e.target.value)}
                 placeholder={
-                  paymentMethod === 'Bank'
-                    ? 'e.g. Dutch-Bangla Bank cheque #449210'
-                    : paymentMethod === 'Mobile Banking'
-                      ? 'e.g. bKash TrxID 9KJ82LM4Q'
+                  selectedAccount?.accountType === 'Bank'
+                    ? `e.g. ${selectedAccount.accountName} deposit slip / cheque #449210`
+                    : selectedAccount?.accountType === 'Mobile Banking'
+                      ? `e.g. ${selectedAccount.accountName} TrxID 9KJ82LM4Q`
                       : 'e.g. Cash received at factory counter'
                 }
                 className="w-full px-3.5 py-2.5 text-sm text-slate-900 bg-white border border-slate-300 rounded-md focus:outline-none focus:border-[#1e3a8a] focus:ring-1 focus:ring-[#1e3a8a]"
@@ -368,14 +368,13 @@ export function ReceivePaymentModal({
                 </p>
               </div>
               <div className="px-4 py-2.5 bg-slate-50 text-[11px] text-slate-600 leading-relaxed">
-                Atomic batch writes <span className="font-mono">txn_type: "payment"</span>,{' '}
-                <span className="font-mono">debit: 0</span>,{' '}
-                <span className="font-mono">
-                  credit: {cleanAmount ?? 0}
-                </span>
-                , <span className="font-mono">reference: "PAY-[AutoID]"</span> to{' '}
-                <span className="font-mono text-slate-800">client_ledger</span> &amp;{' '}
-                <span className="font-mono text-slate-800">money_in</span>.
+                Credits{' '}
+                <span className="font-semibold text-slate-800">
+                  {selectedAccount?.accountName ?? 'Selected Account'}
+                </span>{' '}
+                (<span className="font-mono">money_in</span>) and reduces{' '}
+                {client.clientName}&apos;s due in{' '}
+                <span className="font-mono text-slate-800">client_ledger</span>.
               </div>
             </div>
           </div>
@@ -391,7 +390,7 @@ export function ReceivePaymentModal({
             </button>
             <button
               type="submit"
-              disabled={isSubmitting || cleanAmount === null}
+              disabled={isSubmitting || cleanAmount === null || !selectedAccount}
               className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-emerald-700 hover:bg-emerald-800 disabled:opacity-60 disabled:cursor-not-allowed rounded-md transition-colors cursor-pointer whitespace-nowrap"
             >
               <Banknote className="w-4 h-4 shrink-0" />

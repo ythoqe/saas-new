@@ -2,8 +2,6 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { collection, doc, serverTimestamp, writeBatch } from 'firebase/firestore';
 import {
   AlertTriangle,
-  Banknote,
-  Building2,
   CheckCircle2,
   Wallet,
   X,
@@ -12,11 +10,13 @@ import { db, handleFirestoreError, OperationType } from '../firebase';
 import {
   SALARY_PAYMENT_METHODS,
   SALARY_VALIDATION,
+  type AccountRecord,
   type EmployeeAdvanceRecord,
   type EmployeeRecord,
   type SalaryPaymentMethod,
   type SalaryPaymentRecord,
 } from '../types/mill';
+import { getEffectiveAccounts } from '../utils/accounts';
 import {
   formatCurrency,
   formatIsoDate,
@@ -29,6 +29,7 @@ interface PaySalaryModalProps {
   advances: EmployeeAdvanceRecord[];
   salaryPayments: SalaryPaymentRecord[];
   ownerId: string;
+  accounts: AccountRecord[];
   onClose: () => void;
   onSalaryPaid: (
     employee: EmployeeRecord,
@@ -54,9 +55,15 @@ export function PaySalaryModal({
   advances,
   salaryPayments,
   ownerId,
+  accounts,
   onClose,
   onSalaryPaid,
 }: PaySalaryModalProps) {
+  const effectiveAccounts = useMemo(
+    () => getEffectiveAccounts(accounts, ownerId),
+    [accounts, ownerId]
+  );
+
   const [salaryMonth, setSalaryMonth] = useState(() =>
     getTodayIsoDate().slice(0, 7)
   );
@@ -66,8 +73,9 @@ export function PaySalaryModal({
   const [advanceDeductionInput, setAdvanceDeductionInput] = useState('0');
   const [markAdvancesDeducted, setMarkAdvancesDeducted] = useState(true);
   const [paymentDate, setPaymentDate] = useState(() => getTodayIsoDate());
-  const [paymentMethod, setPaymentMethod] =
-    useState<SalaryPaymentMethod>('Cash');
+  const [selectedAccountId, setSelectedAccountId] = useState<string>(
+    () => effectiveAccounts[0]?.id ?? 'default_cash'
+  );
   const [note, setNote] = useState('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -126,11 +134,11 @@ export function PaySalaryModal({
       setOvertimeInput('0');
       setBonusInput('0');
       setPaymentDate(today);
-      setPaymentMethod('Cash');
+      setSelectedAccountId(effectiveAccounts[0]?.id ?? 'default_cash');
       setNote('');
       setErrorMsg(null);
     }
-  }, [employee]);
+  }, [employee, effectiveAccounts]);
 
   // Auto-populate Advance Deduction whenever employee or selected month's pending advances change
   useEffect(() => {
@@ -151,6 +159,12 @@ export function PaySalaryModal({
   }, [employee, isSubmitting, onClose]);
 
   if (!employee) return null;
+
+  const selectedAccount =
+    effectiveAccounts.find((acc) => acc.id === selectedAccountId) ??
+    effectiveAccounts[0];
+  const paymentMethod: SalaryPaymentMethod =
+    selectedAccount?.accountType ?? 'Cash';
 
   const parsedBasic = Number(basicSalaryInput);
   const parsedOvertime = overtimeInput.trim() === '' ? 0 : Number(overtimeInput);
@@ -188,11 +202,6 @@ export function PaySalaryModal({
     markAdvancesDeducted && pendingMonthAdvances.length > 0 && cleanAdvance > 0;
 
   const monthLabel = formatMonthLabel(salaryMonth);
-
-  const methodIcons: Record<SalaryPaymentMethod, typeof Banknote> = {
-    Cash: Banknote,
-    Bank: Building2,
-  };
 
   const canSubmit =
     !isSubmitting &&
@@ -242,8 +251,8 @@ export function PaySalaryModal({
       return;
     }
 
-    if (!SALARY_PAYMENT_METHODS.includes(paymentMethod)) {
-      setErrorMsg('Please select Cash or Bank as payment method.');
+    if (!selectedAccount || !SALARY_PAYMENT_METHODS.includes(paymentMethod)) {
+      setErrorMsg('Please select a valid payment account.');
       return;
     }
 
@@ -291,7 +300,7 @@ export function PaySalaryModal({
         createdAt: serverTimestamp(),
       });
 
-      // 2. Atomically insert cash/bank outflow in money_out when net cash is paid out
+      // 2. Atomically insert outflow in money_out linked to selected accountId when net cash is paid out
       if (netSalary > 0) {
         const moneyOutDocRef = doc(db, 'money_out', salaryRef);
         batch.set(moneyOutDocRef, {
@@ -303,6 +312,8 @@ export function PaySalaryModal({
           amount: netSalary,
           paymentDate,
           paymentMethod,
+          accountId: selectedAccount.id,
+          accountName: selectedAccount.accountName,
           note: moneyOutNote.slice(0, SALARY_VALIDATION.noteMax),
           createdAt: serverTimestamp(),
         });
@@ -658,36 +669,28 @@ export function PaySalaryModal({
             )}
           </div>
 
-          {/* Payment Method */}
+          {/* Payment Method / Account (Dynamic Dropdown from accounts collection) */}
           <div>
-            <span className="block text-sm font-medium text-slate-700 mb-1.5">
-              Payment Method <span className="text-red-600">*</span>
-            </span>
-            <div
-              role="group"
-              aria-label="Salary payment method"
-              className="grid grid-cols-2 gap-2.5"
+            <label
+              htmlFor="salaryAccountSelect"
+              className="block text-sm font-medium text-slate-700 mb-1.5"
             >
-              {SALARY_PAYMENT_METHODS.map((method) => {
-                const Icon = methodIcons[method];
-                const selected = paymentMethod === method;
-                return (
-                  <button
-                    key={method}
-                    type="button"
-                    onClick={() => setPaymentMethod(method)}
-                    className={`flex items-center justify-center gap-2 px-3 py-2 text-xs font-medium rounded-md border transition-colors cursor-pointer whitespace-nowrap ${
-                      selected
-                        ? 'bg-[#1e3a8a] text-white border-[#1e3a8a]'
-                        : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
-                    }`}
-                  >
-                    <Icon className="w-3.5 h-3.5 shrink-0" />
-                    <span>{method}</span>
-                  </button>
-                );
-              })}
-            </div>
+              Payment Method / Account <span className="text-red-600">*</span>
+            </label>
+            <select
+              id="salaryAccountSelect"
+              required
+              value={selectedAccount?.id ?? selectedAccountId}
+              onChange={(e) => setSelectedAccountId(e.target.value)}
+              disabled={isSubmitting}
+              className="w-full px-3.5 py-2.5 text-sm font-medium text-slate-900 bg-white border border-slate-300 rounded-md focus:outline-none focus:border-[#1e3a8a] focus:ring-1 focus:ring-[#1e3a8a]"
+            >
+              {effectiveAccounts.map((acc) => (
+                <option key={acc.id} value={acc.id}>
+                  {acc.accountName} ({acc.accountType})
+                </option>
+              ))}
+            </select>
           </div>
 
           {/* Note */}

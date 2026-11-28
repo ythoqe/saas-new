@@ -1,6 +1,21 @@
 import type { NavSection, UserRole } from '../types/mill';
 
 export const BOOTSTRAPPED_ADMIN_EMAIL = 'hmmojjammalhoq@gmail.com';
+export const BOOTSTRAPPED_ADMIN_EMAILS: readonly string[] = [
+  'hmmojjammalhoq@gmail.com',
+  'ythoqe@gmail.com',
+];
+
+export function normalizeEmailKey(email: unknown): string {
+  return String(email ?? '')
+    .trim()
+    .toLowerCase();
+}
+
+export function isBootstrappedAdminEmail(email: unknown): boolean {
+  const key = normalizeEmailKey(email);
+  return BOOTSTRAPPED_ADMIN_EMAILS.includes(key);
+}
 
 const ROLE_SECTIONS: Record<UserRole, ReadonlySet<NavSection>> = {
   admin: new Set<NavSection>([
@@ -40,8 +55,15 @@ const ROLE_SECTIONS: Record<UserRole, ReadonlySet<NavSection>> = {
 };
 
 export function normalizeUserRole(role: unknown): UserRole {
-  if (role === 'admin' || role === 'manager' || role === 'accountant') {
-    return role;
+  const normalized = String(role ?? '')
+    .trim()
+    .toLowerCase();
+  if (
+    normalized === 'admin' ||
+    normalized === 'manager' ||
+    normalized === 'accountant'
+  ) {
+    return normalized;
   }
   return 'manager';
 }

@@ -357,6 +357,14 @@ export function LedgerReversalAdjustmentModal({
             amount: roundCurrency(target.linkedMoneyIn.amount),
             paymentDate: todayIso,
             paymentMethod: target.linkedMoneyIn.paymentMethod,
+            ...(target.linkedMoneyIn.accountId
+              ? {
+                  accountId: target.linkedMoneyIn.accountId,
+                  accountName:
+                    target.linkedMoneyIn.accountName ||
+                    target.linkedMoneyIn.paymentMethod,
+                }
+              : {}),
             note: `${trimmedReason} (Cash reversal for ${target.linkedMoneyIn.reference})`
               .slice(0, 300),
             createdAt: serverTimestamp(),
@@ -430,6 +438,14 @@ export function LedgerReversalAdjustmentModal({
             amount: roundCurrency(target.linkedMoneyOut.amount),
             paymentDate: todayIso,
             paymentMethod: target.linkedMoneyOut.paymentMethod,
+            ...(target.linkedMoneyOut.accountId
+              ? {
+                  accountId: target.linkedMoneyOut.accountId,
+                  accountName:
+                    target.linkedMoneyOut.accountName ||
+                    target.linkedMoneyOut.paymentMethod,
+                }
+              : {}),
             note: `${trimmedReason} (Cash reversal for ${target.linkedMoneyOut.reference})`
               .slice(0, 300),
             createdAt: serverTimestamp(),
@@ -487,6 +503,12 @@ export function LedgerReversalAdjustmentModal({
           amount: roundCurrency(rec.amount),
           paymentDate: todayIso,
           paymentMethod: rec.paymentMethod,
+          ...(rec.accountId
+            ? {
+                accountId: rec.accountId,
+                accountName: rec.accountName || rec.paymentMethod,
+              }
+            : {}),
           note: trimmedReason,
           createdAt: serverTimestamp(),
         });
@@ -549,6 +571,12 @@ export function LedgerReversalAdjustmentModal({
           amount: roundCurrency(rec.amount),
           paymentDate: todayIso,
           paymentMethod: rec.paymentMethod,
+          ...(rec.accountId
+            ? {
+                accountId: rec.accountId,
+                accountName: rec.accountName || rec.paymentMethod,
+              }
+            : {}),
           note: trimmedReason,
           createdAt: serverTimestamp(),
         });

@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { doc, serverTimestamp, updateDoc, writeBatch } from 'firebase/firestore';
 import {
   AlertTriangle,
@@ -12,9 +12,11 @@ import {
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import {
   CHEQUE_VALIDATION,
+  type AccountRecord,
   type ChequeRecord,
   type SupplierWithLedgerSummary,
 } from '../types/mill';
+import { getEffectiveAccounts } from '../utils/accounts';
 import {
   formatCurrency,
   formatIsoDate,
@@ -36,6 +38,7 @@ export interface ChequeActionTarget {
 interface ChequeActionModalProps {
   target: ChequeActionTarget | null;
   ownerId: string;
+  accounts: AccountRecord[];
   supplierSummaries: SupplierWithLedgerSummary[];
   onClose: () => void;
   onSuccess: (message: string) => void;
@@ -50,11 +53,22 @@ function generateReference(prefix: string, dateIso: string): string {
 export function ChequeActionModal({
   target,
   ownerId,
+  accounts,
   supplierSummaries,
   onClose,
   onSuccess,
 }: ChequeActionModalProps) {
+  const effectiveAccounts = useMemo(
+    () => getEffectiveAccounts(accounts, ownerId),
+    [accounts, ownerId]
+  );
+  const bankAccounts = useMemo(() => {
+    const banks = effectiveAccounts.filter((acc) => acc.accountType === 'Bank');
+    return banks.length > 0 ? banks : effectiveAccounts;
+  }, [effectiveAccounts]);
+
   const [actionDate, setActionDate] = useState(() => getTodayIsoDate());
+  const [selectedBankAccountId, setSelectedBankAccountId] = useState('');
   const [selectedSupplierId, setSelectedSupplierId] = useState('');
   const [bounceReason, setBounceReason] = useState('');
   const [extraNote, setExtraNote] = useState('');
@@ -64,12 +78,13 @@ export function ChequeActionModal({
   useEffect(() => {
     if (!target) return;
     setActionDate(getTodayIsoDate());
+    setSelectedBankAccountId(bankAccounts[0]?.id ?? 'default_bank');
     setSelectedSupplierId(supplierSummaries[0]?.supplier.id ?? '');
     setBounceReason('');
     setExtraNote(target.cheque.note || '');
     setErrorMessage(null);
     setSubmitting(false);
-  }, [target, supplierSummaries]);
+  }, [target, supplierSummaries, bankAccounts]);
 
   useEffect(() => {
     if (!target) return;
@@ -86,6 +101,10 @@ export function ChequeActionModal({
 
   const { cheque, action } = target;
   const amount = roundCurrency(cheque.amount);
+
+  const selectedBankAccount =
+    bankAccounts.find((acc) => acc.id === selectedBankAccountId) ??
+    bankAccounts[0];
 
   const selectedSupplierSummary = supplierSummaries.find(
     (item) => item.supplier.id === selectedSupplierId
@@ -105,10 +124,12 @@ export function ChequeActionModal({
 
     try {
       if (action === 'self_clear') {
+        const depositAccName = selectedBankAccount?.accountName || 'Bank Account';
+        const depositAccId = selectedBankAccount?.id || 'default_bank';
         const paymentId = generateReference('PAY', actionDate);
         const batch = writeBatch(db);
         const entryNote = (
-          `Cheque Self Clear #${cheque.chequeNo} (${cheque.bankName})${cleanNote ? ` — ${cleanNote}` : ''}`
+          `Cheque Self Clear #${cheque.chequeNo} (${cheque.bankName}) → ${depositAccName}${cleanNote ? ` — ${cleanNote}` : ''}`
         ).slice(0, 300);
 
         batch.set(doc(db, 'client_ledger', paymentId), {
@@ -130,6 +151,8 @@ export function ChequeActionModal({
           amount,
           paymentDate: actionDate,
           paymentMethod: 'Bank',
+          accountId: depositAccId,
+          accountName: depositAccName,
           note: entryNote,
           createdAt: serverTimestamp(),
         });
@@ -145,7 +168,7 @@ export function ChequeActionModal({
 
         await batch.commit();
         onSuccess(
-          `Cheque #${cheque.chequeNo} cleared to Bank (${formatCurrency(amount)}). Bank balance increased and ${cheque.clientName}'s due reduced (${paymentId}).`
+          `Cheque #${cheque.chequeNo} cleared to ${depositAccName} (${formatCurrency(amount)}). Account balance increased and ${cheque.clientName}'s due reduced (${paymentId}).`
         );
         return;
       }
@@ -412,6 +435,31 @@ export function ChequeActionModal({
           </div>
 
           {/* Action-Specific Controls */}
+          {action === 'self_clear' && (
+            <div>
+              <label
+                htmlFor="cheque-deposit-bank-select"
+                className="block text-xs font-semibold text-slate-700 mb-1.5"
+              >
+                Deposit Into Bank Account
+              </label>
+              <select
+                id="cheque-deposit-bank-select"
+                value={selectedBankAccount?.id ?? selectedBankAccountId}
+                onChange={(e) => setSelectedBankAccountId(e.target.value)}
+                disabled={submitting}
+                required
+                className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-md text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#1e3a8a]/20 focus:border-[#1e3a8a]"
+              >
+                {bankAccounts.map((acc) => (
+                  <option key={acc.id} value={acc.id}>
+                    {acc.accountName} ({acc.accountType})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
           {action === 'endorse' && (
             <div>
               <label

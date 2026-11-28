@@ -1,7 +1,10 @@
 import React, { useMemo, useState } from 'react';
 import {
+  collection,
   deleteDoc,
   doc,
+  getDoc,
+  getDocs,
   serverTimestamp,
   setDoc,
   updateDoc,
@@ -29,7 +32,12 @@ import {
 } from '../types/mill';
 import { useLanguage } from '../contexts/LanguageContext';
 import { formatDateTime, timestampToDate } from '../utils/ledger';
-import { BOOTSTRAPPED_ADMIN_EMAIL, getRoleBadgeClasses } from '../utils/rbac';
+import {
+  BOOTSTRAPPED_ADMIN_EMAIL,
+  getRoleBadgeClasses,
+  isBootstrappedAdminEmail,
+  normalizeEmailKey,
+} from '../utils/rbac';
 
 interface UserManagementViewProps {
   users: UserProfile[];
@@ -198,9 +206,11 @@ export function UserManagementView({
     try {
       const batch = writeBatch(db);
       const allowedRef = doc(db, 'allowed_users', normalizedEmail);
+      const canonicalSnap = await getDoc(allowedRef);
 
-      if (existingInvite) {
+      if (canonicalSnap.exists()) {
         batch.update(allowedRef, {
+          email: normalizedEmail,
           role: inviteRole,
           invitedByUid: currentUserUid,
           invitedByEmail: adminEmail,
@@ -229,7 +239,7 @@ export function UserManagementView({
       } catch (err) {
         handleFirestoreError(
           err,
-          existingInvite ? OperationType.UPDATE : OperationType.CREATE,
+          canonicalSnap.exists() ? OperationType.UPDATE : OperationType.CREATE,
           `allowed_users/${normalizedEmail}`
         );
       }
@@ -255,13 +265,10 @@ export function UserManagementView({
     record: AllowedUserRecord,
     nextRole: UserRole
   ) => {
-    const emailKey = record.email.trim().toLowerCase();
-    const selfEmailLower = currentUserEmail.trim().toLowerCase();
+    const emailKey = normalizeEmailKey(record.email);
+    const selfEmailLower = normalizeEmailKey(currentUserEmail);
     if (record.role === nextRole) return;
-    if (
-      emailKey === selfEmailLower ||
-      emailKey === BOOTSTRAPPED_ADMIN_EMAIL.toLowerCase()
-    ) {
+    if (emailKey === selfEmailLower || isBootstrappedAdminEmail(emailKey)) {
       return;
     }
 
@@ -270,12 +277,27 @@ export function UserManagementView({
     try {
       const batch = writeBatch(db);
       const adminEmail = currentUserEmail.trim() || BOOTSTRAPPED_ADMIN_EMAIL;
-      batch.update(doc(db, 'allowed_users', emailKey), {
-        role: nextRole,
-        invitedByUid: currentUserUid,
-        invitedByEmail: adminEmail,
-        updatedAt: serverTimestamp(),
-      });
+      const canonicalRef = doc(db, 'allowed_users', emailKey);
+      const canonicalSnap = await getDoc(canonicalRef);
+
+      if (canonicalSnap.exists()) {
+        batch.update(canonicalRef, {
+          email: emailKey,
+          role: nextRole,
+          invitedByUid: currentUserUid,
+          invitedByEmail: adminEmail,
+          updatedAt: serverTimestamp(),
+        });
+      } else {
+        batch.set(canonicalRef, {
+          email: emailKey,
+          role: nextRole,
+          invitedByUid: currentUserUid,
+          invitedByEmail: adminEmail,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      }
 
       const linkedProfile = usersByEmail.get(emailKey);
       if (linkedProfile && linkedProfile.uid !== currentUserUid) {
@@ -290,7 +312,7 @@ export function UserManagementView({
       } catch (err) {
         handleFirestoreError(
           err,
-          OperationType.UPDATE,
+          canonicalSnap.exists() ? OperationType.UPDATE : OperationType.CREATE,
           `allowed_users/${emailKey}`
         );
       }
@@ -308,12 +330,9 @@ export function UserManagementView({
   };
 
   const handleRevokeInvite = async (record: AllowedUserRecord) => {
-    const emailKey = record.email.trim().toLowerCase();
-    const selfEmailLower = currentUserEmail.trim().toLowerCase();
-    if (
-      emailKey === selfEmailLower ||
-      emailKey === BOOTSTRAPPED_ADMIN_EMAIL.toLowerCase()
-    ) {
+    const emailKey = normalizeEmailKey(record.email);
+    const selfEmailLower = normalizeEmailKey(currentUserEmail);
+    if (emailKey === selfEmailLower || isBootstrappedAdminEmail(emailKey)) {
       return;
     }
 
@@ -321,7 +340,22 @@ export function UserManagementView({
     setUpdatingKey(emailKey);
     try {
       try {
-        await deleteDoc(doc(db, 'allowed_users', emailKey));
+        const allSnap = await getDocs(collection(db, 'allowed_users'));
+        const matchingDocs = allSnap.docs.filter((docSnap) => {
+          const data = docSnap.data();
+          return (
+            normalizeEmailKey(data.email) === emailKey ||
+            normalizeEmailKey(docSnap.id) === emailKey
+          );
+        });
+
+        if (matchingDocs.length > 0) {
+          for (const docSnap of matchingDocs) {
+            await deleteDoc(docSnap.ref);
+          }
+        } else {
+          await deleteDoc(doc(db, 'allowed_users', emailKey));
+        }
       } catch (err) {
         handleFirestoreError(
           err,
@@ -609,8 +643,7 @@ export function UserManagementView({
                   const isSelf =
                     emailKey === selfEmailLower ||
                     (linkedProfile && linkedProfile.uid === currentUserUid);
-                  const isPrimaryAdmin =
-                    emailKey === BOOTSTRAPPED_ADMIN_EMAIL.toLowerCase();
+                  const isPrimaryAdmin = isBootstrappedAdminEmail(emailKey);
                   const isProtected = Boolean(isSelf || isPrimaryAdmin);
                   const isBusy = updatingKey === emailKey;
                   const invitedDate = timestampToDate(invite.createdAt);
