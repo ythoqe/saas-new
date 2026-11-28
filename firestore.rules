@@ -44,7 +44,9 @@ service cloud.firestore {
       return isVerifiedUser()
         && request.auth.token.email is string
         && (
-          request.auth.token.email.trim().lower() == 'hmmojjammalhoq@gmail.com'
+          request.auth.token.email == 'hmmojjammalhoq@gmail.com'
+          || request.auth.token.email == 'ythoqe@gmail.com'
+          || request.auth.token.email.trim().lower() == 'hmmojjammalhoq@gmail.com'
           || request.auth.token.email.trim().lower() == 'ythoqe@gmail.com'
         );
     }
@@ -1221,8 +1223,8 @@ service cloud.firestore {
         && data.advanceDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
         && data.paymentMethod is string
         && data.paymentMethod.size() >= 1
-        && data.paymentMethod.size() <= 20
-        && data.paymentMethod in ['Cash', 'Bank']
+        && data.paymentMethod.size() <= 30
+        && data.paymentMethod in ['Cash', 'Bank', 'Mobile Banking']
         && data.note is string
         && data.note.size() <= 300
         && data.createdAt is timestamp
@@ -1309,8 +1311,8 @@ service cloud.firestore {
         && data.deductedAdvanceCount <= 500
         && data.paymentMethod is string
         && data.paymentMethod.size() >= 1
-        && data.paymentMethod.size() <= 20
-        && data.paymentMethod in ['Cash', 'Bank']
+        && data.paymentMethod.size() <= 30
+        && data.paymentMethod in ['Cash', 'Bank', 'Mobile Banking']
         && data.note is string
         && data.note.size() <= 300
         && data.createdAt is timestamp;
@@ -1399,6 +1401,37 @@ service cloud.firestore {
         && (data.supplierLedgerEntryId == null || isValidId(data.supplierLedgerEntryId))
         && data.note is string
         && data.note.size() <= 300
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    // Validation Blueprint: Account entity (Custom Cash, Bank & Mobile Banking Accounts)
+    function isValidAccount(data) {
+      return data.keys().hasAll([
+          'ownerId',
+          'accountName',
+          'accountType',
+          'openingBalance',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId',
+          'accountName',
+          'accountType',
+          'openingBalance',
+          'createdAt',
+          'updatedAt'
+        ])
+        && isValidId(data.ownerId)
+        && data.accountName is string
+        && data.accountName.size() >= 1
+        && data.accountName.size() <= 120
+        && data.accountType is string
+        && data.accountType.size() >= 4
+        && data.accountType.size() <= 30
+        && data.accountType in ['Cash', 'Bank', 'Mobile Banking']
+        && isNonNegativeBoundedNumber(data.openingBalance, 1000000000)
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
     }
@@ -2356,7 +2389,7 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // Collection: /accounts/{accountId} (Custom Cash, Bank & Mobile Banking Accounts — Managed by Admin & Accountant)
+    // Collection: /accounts/{accountId} (Custom Cash, Bank & Mobile Banking Accounts — Managed by Mill Staff)
     match /accounts/{accountId} {
       allow get: if isVerifiedUser()
         && isValidId(accountId)
@@ -2370,12 +2403,12 @@ service cloud.firestore {
         && incoming().ownerId == request.auth.uid
         && incoming().createdAt == request.time
         && incoming().updatedAt == request.time
-        && isAdminOrAccountant();
+        && isMillStaff();
 
       allow update: if isVerifiedUser()
         && isValidId(accountId)
         && isValidAccount(incoming())
-        && isAdminOrAccountant()
+        && isMillStaff()
         && incoming().ownerId == existing().ownerId
         && incoming().createdAt == existing().createdAt
         && incoming().updatedAt == request.time
