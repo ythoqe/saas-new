@@ -181,7 +181,7 @@
     },
     "MoneyInRecord": {
       "title": "MoneyInRecord",
-      "description": "An immutable cash/bank/mobile-banking inflow record created atomically alongside a client_ledger payment credit entry (PAY-*) or as a cash reversal adjustment (REV-*).",
+      "description": "An immutable cash/bank/mobile-banking inflow record created atomically alongside a client_ledger payment credit entry (PAY-*), an internal account transfer outflow (TRF-*), or a cash reversal adjustment (REV-*).",
       "type": "object",
       "properties": {
         "ownerId": {
@@ -192,7 +192,21 @@
         },
         "source": {
           "type": "string",
-          "enum": ["client", "adjustment"]
+          "enum": ["client", "adjustment", "transfer"]
+        },
+        "category": {
+          "type": "string",
+          "enum": ["Transfer"]
+        },
+        "transferId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "counterAccount": {
+          "type": "string",
+          "enum": ["Cash", "Bank", "Mobile Banking"]
         },
         "clientId": {
           "type": "string",
@@ -210,7 +224,7 @@
           "type": "string",
           "minLength": 5,
           "maxLength": 80,
-          "pattern": "^(PAY|REV)-[a-zA-Z0-9_\\-]+$"
+          "pattern": "^(PAY|REV|TRF)-[a-zA-Z0-9_\\-]+$"
         },
         "amount": {
           "type": "number"
@@ -425,7 +439,7 @@
     },
     "MoneyOutRecord": {
       "title": "MoneyOutRecord",
-      "description": "An immutable cash/bank outflow record created atomically alongside a supplier_ledger payment debit entry (SPAY-*), a factory expense record (EXP-*), an employee weekly advance (ADV-*), a monthly employee salary payment (SAL-*), or a cash reversal adjustment (REV-*).",
+      "description": "An immutable cash/bank/mobile-banking outflow record created atomically alongside a supplier_ledger payment debit entry (SPAY-*), a factory expense record (EXP-*), an employee weekly advance (ADV-*), a monthly employee salary payment (SAL-*), an internal account transfer inflow (TRF-*), or a cash reversal adjustment (REV-*).",
       "type": "object",
       "properties": {
         "ownerId": {
@@ -436,7 +450,17 @@
         },
         "source": {
           "type": "string",
-          "enum": ["supplier", "expense", "advance", "salary", "adjustment"]
+          "enum": ["supplier", "expense", "advance", "salary", "adjustment", "transfer"]
+        },
+        "transferId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "counterAccount": {
+          "type": "string",
+          "enum": ["Cash", "Bank", "Mobile Banking"]
         },
         "supplierId": {
           "type": "string",
@@ -485,14 +509,15 @@
             "Food",
             "Office",
             "Other",
-            "Employee Advance"
+            "Employee Advance",
+            "Transfer"
           ]
         },
         "reference": {
           "type": "string",
           "minLength": 5,
           "maxLength": 80,
-          "pattern": "^(SPAY|EXP|ADV|SAL|REV)-[a-zA-Z0-9_\\-]+$"
+          "pattern": "^(SPAY|EXP|ADV|SAL|REV|TRF)-[a-zA-Z0-9_\\-]+$"
         },
         "amount": {
           "type": "number"

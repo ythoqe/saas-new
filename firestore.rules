@@ -376,6 +376,68 @@ service cloud.firestore {
         && data.createdAt is timestamp;
     }
 
+    // Validation Blueprint: MoneyInRecord (Atomic Account-to-Account Transfer Inflow)
+    function isValidTransferMoneyIn(data) {
+      return data.keys().hasAll([
+          'ownerId',
+          'source',
+          'category',
+          'transferId',
+          'counterAccount',
+          'reference',
+          'amount',
+          'paymentDate',
+          'paymentMethod',
+          'note',
+          'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId',
+          'source',
+          'category',
+          'transferId',
+          'counterAccount',
+          'reference',
+          'amount',
+          'paymentDate',
+          'paymentMethod',
+          'note',
+          'createdAt'
+        ])
+        && isValidId(data.ownerId)
+        && data.ownerId == request.auth.uid
+        && data.source is string
+        && data.source.size() == 8
+        && data.source == 'transfer'
+        && data.category is string
+        && data.category.size() == 8
+        && data.category == 'Transfer'
+        && data.transferId is string
+        && data.transferId.size() >= 5
+        && data.transferId.size() <= 80
+        && data.transferId.matches('^TRF-[a-zA-Z0-9_\\-]+$')
+        && data.counterAccount is string
+        && data.counterAccount.size() >= 1
+        && data.counterAccount.size() <= 30
+        && data.counterAccount in ['Cash', 'Bank', 'Mobile Banking']
+        && data.reference is string
+        && data.reference.size() >= 5
+        && data.reference.size() <= 80
+        && data.reference.matches('^TRF-[a-zA-Z0-9_\\-]+$')
+        && isPositiveBoundedNumber(data.amount, 1000000000)
+        && data.paymentDate is string
+        && data.paymentDate.size() == 10
+        && data.paymentDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && data.paymentMethod is string
+        && data.paymentMethod.size() >= 1
+        && data.paymentMethod.size() <= 30
+        && data.paymentMethod in ['Cash', 'Bank', 'Mobile Banking']
+        && data.paymentMethod != data.counterAccount
+        && data.note is string
+        && data.note.size() <= 300
+        && data.createdAt is timestamp;
+    }
+
     // Validation Blueprint: Supplier entity (strictly excludes stored balance/payable fields)
     function isValidSupplier(data) {
       return data.keys().hasAll([
@@ -736,6 +798,68 @@ service cloud.firestore {
         && data.paymentMethod.size() >= 1
         && data.paymentMethod.size() <= 30
         && data.paymentMethod in ['Cash', 'Bank', 'Mobile Banking']
+        && data.note is string
+        && data.note.size() <= 300
+        && data.createdAt is timestamp;
+    }
+
+    // Validation Blueprint: MoneyOutRecord (Atomic Account-to-Account Transfer Outflow)
+    function isValidTransferMoneyOut(data) {
+      return data.keys().hasAll([
+          'ownerId',
+          'source',
+          'category',
+          'transferId',
+          'counterAccount',
+          'reference',
+          'amount',
+          'paymentDate',
+          'paymentMethod',
+          'note',
+          'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId',
+          'source',
+          'category',
+          'transferId',
+          'counterAccount',
+          'reference',
+          'amount',
+          'paymentDate',
+          'paymentMethod',
+          'note',
+          'createdAt'
+        ])
+        && isValidId(data.ownerId)
+        && data.ownerId == request.auth.uid
+        && data.source is string
+        && data.source.size() == 8
+        && data.source == 'transfer'
+        && data.category is string
+        && data.category.size() == 8
+        && data.category == 'Transfer'
+        && data.transferId is string
+        && data.transferId.size() >= 5
+        && data.transferId.size() <= 80
+        && data.transferId.matches('^TRF-[a-zA-Z0-9_\\-]+$')
+        && data.counterAccount is string
+        && data.counterAccount.size() >= 1
+        && data.counterAccount.size() <= 30
+        && data.counterAccount in ['Cash', 'Bank', 'Mobile Banking']
+        && data.reference is string
+        && data.reference.size() >= 5
+        && data.reference.size() <= 80
+        && data.reference.matches('^TRF-[a-zA-Z0-9_\\-]+$')
+        && isPositiveBoundedNumber(data.amount, 1000000000)
+        && data.paymentDate is string
+        && data.paymentDate.size() == 10
+        && data.paymentDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && data.paymentMethod is string
+        && data.paymentMethod.size() >= 1
+        && data.paymentMethod.size() <= 30
+        && data.paymentMethod in ['Cash', 'Bank', 'Mobile Banking']
+        && data.paymentMethod != data.counterAccount
         && data.note is string
         && data.note.size() <= 300
         && data.createdAt is timestamp;
@@ -1320,6 +1444,22 @@ service cloud.firestore {
             && incoming().reference == paymentId
             && incoming().createdAt == request.time
             && isAdminOrAccountant()
+          ) || (
+            isValidTransferMoneyIn(incoming())
+            && incoming().transferId == paymentId
+            && incoming().reference == paymentId
+            && incoming().createdAt == request.time
+            && isAdminOrAccountant()
+            && existsAfter(/databases/$(database)/documents/money_out/$(paymentId))
+            && getAfter(/databases/$(database)/documents/money_out/$(paymentId)).data.ownerId == request.auth.uid
+            && getAfter(/databases/$(database)/documents/money_out/$(paymentId)).data.source == 'transfer'
+            && getAfter(/databases/$(database)/documents/money_out/$(paymentId)).data.category == 'Transfer'
+            && getAfter(/databases/$(database)/documents/money_out/$(paymentId)).data.transferId == paymentId
+            && getAfter(/databases/$(database)/documents/money_out/$(paymentId)).data.reference == paymentId
+            && getAfter(/databases/$(database)/documents/money_out/$(paymentId)).data.amount == incoming().amount
+            && getAfter(/databases/$(database)/documents/money_out/$(paymentId)).data.paymentDate == incoming().paymentDate
+            && getAfter(/databases/$(database)/documents/money_out/$(paymentId)).data.paymentMethod == incoming().counterAccount
+            && getAfter(/databases/$(database)/documents/money_out/$(paymentId)).data.counterAccount == incoming().paymentMethod
           )
         );
 
@@ -1540,6 +1680,22 @@ service cloud.firestore {
             && incoming().reference == paymentId
             && incoming().createdAt == request.time
             && isAdminOrAccountant()
+          ) || (
+            isValidTransferMoneyOut(incoming())
+            && incoming().transferId == paymentId
+            && incoming().reference == paymentId
+            && incoming().createdAt == request.time
+            && isAdminOrAccountant()
+            && existsAfter(/databases/$(database)/documents/money_in/$(paymentId))
+            && getAfter(/databases/$(database)/documents/money_in/$(paymentId)).data.ownerId == request.auth.uid
+            && getAfter(/databases/$(database)/documents/money_in/$(paymentId)).data.source == 'transfer'
+            && getAfter(/databases/$(database)/documents/money_in/$(paymentId)).data.category == 'Transfer'
+            && getAfter(/databases/$(database)/documents/money_in/$(paymentId)).data.transferId == paymentId
+            && getAfter(/databases/$(database)/documents/money_in/$(paymentId)).data.reference == paymentId
+            && getAfter(/databases/$(database)/documents/money_in/$(paymentId)).data.amount == incoming().amount
+            && getAfter(/databases/$(database)/documents/money_in/$(paymentId)).data.paymentDate == incoming().paymentDate
+            && getAfter(/databases/$(database)/documents/money_in/$(paymentId)).data.paymentMethod == incoming().counterAccount
+            && getAfter(/databases/$(database)/documents/money_in/$(paymentId)).data.counterAccount == incoming().paymentMethod
           )
         );
 

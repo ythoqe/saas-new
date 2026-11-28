@@ -10,13 +10,23 @@ import {
   setDoc,
   writeBatch,
 } from 'firebase/firestore';
-import { CheckCircle2, Globe, Menu, Plus, X } from 'lucide-react';
+import {
+  ArrowLeftRight,
+  CheckCircle2,
+  Globe,
+  Menu,
+  Plus,
+  Printer,
+  X,
+} from 'lucide-react';
 import { auth, db, handleFirestoreError, OperationType } from './firebase';
 import {
   LanguageProvider,
   useLanguage,
   type Language,
 } from './contexts/LanguageContext';
+import { AccountsView } from './components/AccountsView';
+import { AccountTransferModal } from './components/AccountTransferModal';
 import { AddClientDrawer } from './components/AddClientDrawer';
 import { AddSupplierDrawer } from './components/AddSupplierDrawer';
 import { AuthScreen } from './components/AuthScreen';
@@ -56,6 +66,11 @@ import { PaySalaryModal } from './components/PaySalaryModal';
 import { PaySupplierModal } from './components/PaySupplierModal';
 import { PurchasesListView } from './components/PurchasesListView';
 import { ReceivePaymentModal } from './components/ReceivePaymentModal';
+import {
+  ReportPrintModal,
+  type ReportPrintPayload,
+} from './components/ReportPrintModal';
+import { ReportsView } from './components/ReportsView';
 import { Sidebar } from './components/Sidebar';
 import {
   StatementPrintModal,
@@ -82,6 +97,7 @@ import type {
   MoneyOutRecord,
   NavSection,
   OrderRecord,
+  PaymentMethod,
   PurchaseRecord,
   SalaryPaymentMethod,
   SalaryPaymentRecord,
@@ -218,6 +234,16 @@ function MillDashboardShell() {
     | { kind: 'supplier'; id: string }
     | null
   >(null);
+
+  // Financial Reports (P&L / Cash & Bank Book) A4 print modal
+  const [reportPrintPayload, setReportPrintPayload] =
+    useState<ReportPrintPayload | null>(null);
+  const [reportPrintSignal, setReportPrintSignal] = useState(0);
+
+  // Accounts / Finance transfer modal
+  const [transferModalOpen, setTransferModalOpen] = useState(false);
+  const [transferFromAccount, setTransferFromAccount] =
+    useState<PaymentMethod>('Cash');
 
   // Correction, Edit/Delete, and Append-Only Reversal/Adjustment modals
   const [deleteTarget, setDeleteTarget] = useState<DeleteTargetConfig | null>(
@@ -725,12 +751,26 @@ function MillDashboardShell() {
               snapshot.docs.map((docSnap) => {
                 const data = docSnap.data();
                 const refStr = String(data.reference ?? '');
+                const isTransfer =
+                  data.source === 'transfer' ||
+                  String(data.category ?? '') === 'Transfer' ||
+                  refStr.startsWith('TRF-');
                 const isAdjustment =
-                  data.source === 'adjustment' || refStr.startsWith('REV-');
+                  !isTransfer &&
+                  (data.source === 'adjustment' || refStr.startsWith('REV-'));
                 return {
                   id: docSnap.id,
                   ownerId: String(data.ownerId ?? ''),
-                  source: isAdjustment ? 'adjustment' : 'client',
+                  source: isTransfer
+                    ? 'transfer'
+                    : isAdjustment
+                      ? 'adjustment'
+                      : 'client',
+                  category: isTransfer ? 'Transfer' : null,
+                  transferId: String(data.transferId ?? ''),
+                  counterAccount: data.counterAccount
+                    ? (String(data.counterAccount) as PaymentMethod)
+                    : null,
                   clientId: String(data.clientId ?? ''),
                   ledgerEntryId: String(data.ledgerEntryId ?? ''),
                   reference: refStr,
@@ -756,18 +796,26 @@ function MillDashboardShell() {
               snapshot.docs.map((docSnap) => {
                 const data = docSnap.data();
                 const refStr = String(data.reference ?? '');
+                const isTransfer =
+                  data.source === 'transfer' ||
+                  String(data.category ?? '') === 'Transfer' ||
+                  refStr.startsWith('TRF-');
                 const isAdjustment =
-                  data.source === 'adjustment' || refStr.startsWith('REV-');
+                  !isTransfer &&
+                  (data.source === 'adjustment' || refStr.startsWith('REV-'));
                 const isSalary =
+                  !isTransfer &&
                   !isAdjustment &&
                   (Boolean(data.salaryPaymentId) || refStr.startsWith('SAL-'));
                 const isAdvance =
+                  !isTransfer &&
                   !isAdjustment &&
                   !isSalary &&
                   (Boolean(data.advanceId) ||
                     refStr.startsWith('ADV-') ||
                     String(data.category ?? '') === 'Employee Advance');
                 const isExpense =
+                  !isTransfer &&
                   !isAdjustment &&
                   !isSalary &&
                   !isAdvance &&
@@ -775,26 +823,35 @@ function MillDashboardShell() {
                 return {
                   id: docSnap.id,
                   ownerId: String(data.ownerId ?? ''),
-                  source: isAdjustment
-                    ? 'adjustment'
-                    : isSalary
-                      ? 'salary'
-                      : isAdvance
-                        ? 'advance'
-                        : isExpense
-                          ? 'expense'
-                          : 'supplier',
+                  source: isTransfer
+                    ? 'transfer'
+                    : isAdjustment
+                      ? 'adjustment'
+                      : isSalary
+                        ? 'salary'
+                        : isAdvance
+                          ? 'advance'
+                          : isExpense
+                            ? 'expense'
+                            : 'supplier',
                   supplierId: String(data.supplierId ?? ''),
                   ledgerEntryId: String(data.ledgerEntryId ?? ''),
                   expenseId: String(data.expenseId ?? ''),
                   employeeId: String(data.employeeId ?? ''),
                   advanceId: String(data.advanceId ?? ''),
                   salaryPaymentId: String(data.salaryPaymentId ?? ''),
+                  transferId: String(data.transferId ?? ''),
+                  counterAccount: data.counterAccount
+                    ? (String(data.counterAccount) as PaymentMethod)
+                    : null,
                   category: data.category
                     ? (String(data.category) as
                         | ExpenseCategory
-                        | 'Employee Advance')
-                    : null,
+                        | 'Employee Advance'
+                        | 'Transfer')
+                    : isTransfer
+                      ? 'Transfer'
+                      : null,
                   reference: refStr,
                   amount: Number(data.amount ?? 0),
                   paymentDate: String(data.paymentDate ?? ''),
@@ -1156,6 +1213,29 @@ function MillDashboardShell() {
     return roundCurrency(sum);
   }, [givingAdvanceEmployee, employeeAdvances, currentYearMonth]);
 
+  const accountBalances = useMemo<Record<PaymentMethod, number>>(() => {
+    const totals: Record<PaymentMethod, number> = {
+      Cash: 0,
+      Bank: 0,
+      'Mobile Banking': 0,
+    };
+    for (const rec of moneyInRecords) {
+      if (rec.paymentMethod in totals) {
+        totals[rec.paymentMethod] = roundCurrency(
+          totals[rec.paymentMethod] + (Number(rec.amount) || 0)
+        );
+      }
+    }
+    for (const rec of moneyOutRecords) {
+      if (rec.paymentMethod in totals) {
+        totals[rec.paymentMethod] = roundCurrency(
+          totals[rec.paymentMethod] - (Number(rec.amount) || 0)
+        );
+      }
+    }
+    return totals;
+  }, [moneyInRecords, moneyOutRecords]);
+
   const statementPayload = useMemo<StatementPrintPayload | null>(() => {
     if (!statementTarget) return null;
     if (statementTarget.kind === 'client') {
@@ -1287,10 +1367,20 @@ function MillDashboardShell() {
       title: t('page.overview.title'),
       subtitle: t('page.overview.subtitle'),
     },
+    accounts: {
+      breadcrumb: `${t('nav.group.reports')} / ${t('nav.accounts')}`,
+      title: t('page.accounts.title'),
+      subtitle: t('page.accounts.subtitle'),
+    },
     ledger: {
       breadcrumb: `${t('nav.group.reports')} / ${t('nav.ledger')}`,
       title: t('page.ledger.title'),
       subtitle: t('page.ledger.subtitle'),
+    },
+    reports: {
+      breadcrumb: `${t('nav.group.reports')} / ${t('nav.reports')}`,
+      title: t('page.reports.title'),
+      subtitle: t('page.reports.subtitle'),
     },
     users: {
       breadcrumb: `${t('nav.group.admin')} / ${t('nav.users')}`,
@@ -1578,17 +1668,22 @@ function MillDashboardShell() {
     const linkedLedgerEntry = record.ledgerEntryId
       ? supplierLedgerEntries.find((e) => e.id === record.ledgerEntryId) ?? null
       : null;
-    const counterpartyLabel = supplier
-      ? `${supplier.supplierName} (${supplier.companyName})`
-      : employee
-        ? record.source === 'salary'
-          ? `${employee.name} (${employee.department}) · Salary`
-          : `${employee.name} (${employee.department})`
-        : record.source === 'salary'
-          ? 'Employee Salary'
-          : record.category
-            ? `Factory Expense · ${record.category}`
-            : 'Cash Outflow';
+    const counterpartyLabel =
+      record.source === 'transfer'
+        ? record.counterAccount
+          ? `Account Transfer (${record.paymentMethod} → ${record.counterAccount})`
+          : 'Account Transfer'
+        : supplier
+          ? `${supplier.supplierName} (${supplier.companyName})`
+          : employee
+            ? record.source === 'salary'
+              ? `${employee.name} (${employee.department}) · Salary`
+              : `${employee.name} (${employee.department})`
+            : record.source === 'salary'
+              ? 'Employee Salary'
+              : record.category
+                ? `Factory Expense · ${record.category}`
+                : 'Cash Outflow';
     setLedgerAdjustmentTarget({
       kind: 'money_out',
       record,
@@ -1809,6 +1904,33 @@ function MillDashboardShell() {
         >
           <Plus className="w-4 h-4 shrink-0" />
           {t('cta.addNewClient')}
+        </button>
+      );
+    }
+    if (activeSection === 'accounts') {
+      return (
+        <button
+          type="button"
+          onClick={() => {
+            setTransferFromAccount('Cash');
+            setTransferModalOpen(true);
+          }}
+          className="inline-flex items-center gap-2 px-3.5 sm:px-4 py-2 text-xs sm:text-sm font-medium text-white bg-[#1e3a8a] hover:bg-[#1e40af] rounded-md transition-colors cursor-pointer whitespace-nowrap shrink-0"
+        >
+          <ArrowLeftRight className="w-4 h-4 shrink-0" />
+          {t('cta.accountTransfer')}
+        </button>
+      );
+    }
+    if (activeSection === 'reports') {
+      return (
+        <button
+          type="button"
+          onClick={() => setReportPrintSignal((n) => n + 1)}
+          className="inline-flex items-center gap-2 px-3.5 sm:px-4 py-2 text-xs sm:text-sm font-medium text-white bg-emerald-700 hover:bg-emerald-800 rounded-md transition-colors cursor-pointer whitespace-nowrap shrink-0"
+        >
+          <Printer className="w-4 h-4 shrink-0" />
+          {t('cta.printReport')}
         </button>
       );
     }
@@ -2141,6 +2263,38 @@ function MillDashboardShell() {
             />
           )}
 
+          {activeSection === 'accounts' && allowCashflow && (
+            <AccountsView
+              moneyInRecords={moneyInRecords}
+              moneyOutRecords={moneyOutRecords}
+              clientsById={clientsById}
+              suppliersById={suppliersById}
+              employeesById={employeesById}
+              isLoading={isDataLoading}
+              canAdjustLedgers={canAdjust}
+              onOpenTransfer={(defaultFrom) => {
+                setTransferFromAccount(defaultFrom ?? 'Cash');
+                setTransferModalOpen(true);
+              }}
+              onCorrectMoneyIn={handleOpenCorrectMoneyIn}
+              onCorrectMoneyOut={handleOpenCorrectMoneyOut}
+            />
+          )}
+
+          {activeSection === 'reports' && allowCashflow && (
+            <ReportsView
+              ledgerEntries={ledgerEntries}
+              moneyInRecords={moneyInRecords}
+              moneyOutRecords={moneyOutRecords}
+              clientsById={clientsById}
+              suppliersById={suppliersById}
+              employeesById={employeesById}
+              isLoading={isDataLoading}
+              printTriggerSignal={reportPrintSignal}
+              onOpenPrintReport={(payload) => setReportPrintPayload(payload)}
+            />
+          )}
+
           {activeSection === 'users' && isAdmin && (
             <UserManagementView
               users={registeredUsers}
@@ -2415,6 +2569,21 @@ function MillDashboardShell() {
           setToast({ message });
         }}
       />
+
+      {/* Atomic Account-to-Account Transfer Modal (writeBatch money_out + money_in) */}
+      <AccountTransferModal
+        open={transferModalOpen}
+        ownerId={user.uid}
+        initialFromAccount={transferFromAccount}
+        balances={accountBalances}
+        onClose={() => setTransferModalOpen(false)}
+        onSuccess={(fromAccount, toAccount, amount, transferRef) => {
+          setTransferModalOpen(false);
+          setToast({
+            message: `Transferred ${formatCurrency(amount)} from ${fromAccount} to ${toAccount} (${transferRef}).`,
+          });
+        }}
+      />
       </div>
 
       {/* Invoice & Delivery Challan Print Modal (Outside .no-print for clean 80mm thermal printing) */}
@@ -2427,6 +2596,12 @@ function MillDashboardShell() {
       <StatementPrintModal
         payload={statementPayload}
         onClose={() => setStatementTarget(null)}
+      />
+
+      {/* Financial Reports (P&L & Cash/Bank Book) A4 Print Modal (Outside .no-print for clean A4 printing) */}
+      <ReportPrintModal
+        payload={reportPrintPayload}
+        onClose={() => setReportPrintPayload(null)}
       />
     </>
   );

@@ -75,7 +75,13 @@ type UnifiedTransaction =
     }
   | {
       kind: 'money_out';
-      subType: 'supplier' | 'expense' | 'advance' | 'salary' | 'adjustment';
+      subType:
+        | 'supplier'
+        | 'expense'
+        | 'advance'
+        | 'salary'
+        | 'transfer'
+        | 'adjustment';
       id: string;
       rawRecord: MoneyOutRecord;
       reference: string;
@@ -222,14 +228,24 @@ export function DashboardOverview({
   // 3B. Recent Transactions (Last 5 combined from money_in and money_out)
   const recentTransactions = useMemo<UnifiedTransaction[]>(() => {
     const incoming: UnifiedTransaction[] = moneyInRecords.map((rec) => {
+      const isTransfer =
+        rec.source === 'transfer' ||
+        rec.category === 'Transfer' ||
+        rec.reference.startsWith('TRF-');
       const isAdjustment =
-        rec.source === 'adjustment' || rec.reference.startsWith('REV-');
+        !isTransfer &&
+        (rec.source === 'adjustment' || rec.reference.startsWith('REV-'));
       const client = clientsById.get(rec.clientId);
-      const label = isAdjustment
-        ? rec.note || 'Cash Reversal Adjustment'
-        : client
-          ? client.clientName
-          : 'Client Account';
+      const label = isTransfer
+        ? rec.note ||
+          (rec.counterAccount
+            ? `Transfer from ${rec.counterAccount}`
+            : 'Account Transfer')
+        : isAdjustment
+          ? rec.note || 'Cash Reversal Adjustment'
+          : client
+            ? client.clientName
+            : 'Client Account';
       return {
         kind: 'money_in',
         id: `in-${rec.id}`,
@@ -248,6 +264,33 @@ export function DashboardOverview({
     });
 
     const outgoing: UnifiedTransaction[] = moneyOutRecords.map((rec) => {
+      const isTransfer =
+        rec.source === 'transfer' ||
+        rec.category === 'Transfer' ||
+        rec.reference.startsWith('TRF-');
+      if (isTransfer) {
+        return {
+          kind: 'money_out',
+          subType: 'transfer',
+          id: `out-${rec.id}`,
+          rawRecord: rec,
+          reference: rec.reference || rec.id,
+          amount: rec.amount,
+          paymentDate: rec.paymentDate,
+          paymentMethod: rec.paymentMethod,
+          note: rec.note,
+          counterpartyId: rec.id,
+          counterpartyName:
+            rec.note ||
+            (rec.counterAccount
+              ? `Transfer to ${rec.counterAccount}`
+              : 'Account Transfer'),
+          sortTimestamp:
+            timestampToDate(rec.createdAt)?.getTime() ??
+            getIsoDateFallbackMs(rec.paymentDate),
+        };
+      }
+
       const isAdjustment =
         rec.source === 'adjustment' || rec.reference.startsWith('REV-');
       if (isAdjustment) {
@@ -795,17 +838,23 @@ export function DashboardOverview({
                   txn.kind === 'money_out' && txn.subType === 'advance';
                 const isSalary =
                   txn.kind === 'money_out' && txn.subType === 'salary';
+                const isTransfer =
+                  txn.reference.startsWith('TRF-') ||
+                  (txn.kind === 'money_out' && txn.subType === 'transfer');
                 const isAdjustment =
-                  txn.reference.startsWith('REV-') ||
-                  (txn.kind === 'money_out' && txn.subType === 'adjustment');
-                const client = isMoneyIn
-                  ? clientsById.get(txn.counterpartyId)
-                  : undefined;
+                  !isTransfer &&
+                  (txn.reference.startsWith('REV-') ||
+                    (txn.kind === 'money_out' && txn.subType === 'adjustment'));
+                const client =
+                  isMoneyIn && !isTransfer
+                    ? clientsById.get(txn.counterpartyId)
+                    : undefined;
                 const supplier =
                   !isMoneyIn &&
                   !isExpense &&
                   !isAdvance &&
                   !isSalary &&
+                  !isTransfer &&
                   !isAdjustment
                     ? suppliersById.get(txn.counterpartyId)
                     : undefined;
@@ -818,7 +867,9 @@ export function DashboardOverview({
                     <button
                       type="button"
                       onClick={() => {
-                        if (isMoneyIn && client) {
+                        if (isTransfer) {
+                          onNavigate('accounts');
+                        } else if (isMoneyIn && client) {
                           onOpenClientPayments(client);
                         } else if (isAdvance || isSalary) {
                           if (canSeeEmployees) {
@@ -852,22 +903,30 @@ export function DashboardOverview({
                         <p className="text-xs text-slate-500 truncate mt-0.5">
                           <span
                             className={`font-medium ${
-                              isMoneyIn ? 'text-emerald-700' : 'text-red-700'
+                              isTransfer
+                                ? 'text-indigo-700'
+                                : isMoneyIn
+                                  ? 'text-emerald-700'
+                                  : 'text-red-700'
                             }`}
                           >
-                            {isAdjustment
+                            {isTransfer
                               ? isMoneyIn
-                                ? t('dashboard.txn.reversalIn')
-                                : t('dashboard.txn.reversalOut')
-                              : isMoneyIn
-                                ? t('dashboard.txn.moneyIn')
-                                : isSalary
-                                  ? t('dashboard.txn.salaryOut')
-                                  : isAdvance
-                                    ? t('dashboard.txn.advanceOut')
-                                    : isExpense
-                                      ? t('dashboard.txn.expenseOut')
-                                      : t('dashboard.txn.moneyOut')}
+                                ? 'Transfer In'
+                                : 'Transfer Out'
+                              : isAdjustment
+                                ? isMoneyIn
+                                  ? t('dashboard.txn.reversalIn')
+                                  : t('dashboard.txn.reversalOut')
+                                : isMoneyIn
+                                  ? t('dashboard.txn.moneyIn')
+                                  : isSalary
+                                    ? t('dashboard.txn.salaryOut')
+                                    : isAdvance
+                                      ? t('dashboard.txn.advanceOut')
+                                      : isExpense
+                                        ? t('dashboard.txn.expenseOut')
+                                        : t('dashboard.txn.moneyOut')}
                           </span>{' '}
                           · {translatePaymentMethod(txn.paymentMethod)} ·{' '}
                           {formatIsoDate(txn.paymentDate)}

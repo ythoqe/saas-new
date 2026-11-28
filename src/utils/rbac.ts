@@ -14,7 +14,9 @@ const ROLE_SECTIONS: Record<UserRole, ReadonlySet<NavSection>> = {
     'inventory',
     'expenses',
     'employees',
+    'accounts',
     'ledger',
+    'reports',
     'users',
   ]),
   manager: new Set<NavSection>([
@@ -31,7 +33,9 @@ const ROLE_SECTIONS: Record<UserRole, ReadonlySet<NavSection>> = {
     'clients',
     'suppliers',
     'expenses',
+    'accounts',
     'ledger',
+    'reports',
   ]),
 };
 

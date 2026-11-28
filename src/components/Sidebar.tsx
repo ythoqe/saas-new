@@ -1,7 +1,9 @@
 import {
+  BarChart3,
   BookOpen,
   Boxes,
   ClipboardList,
+  Landmark,
   LayoutDashboard,
   Layers,
   LogOut,
@@ -154,6 +156,16 @@ export function Sidebar({
     {
       heading: t('nav.group.reports'),
       items: [
+        {
+          id: 'accounts',
+          label: t('nav.accounts'),
+          icon: Landmark,
+        },
+        {
+          id: 'reports',
+          label: t('nav.reports'),
+          icon: BarChart3,
+        },
         {
           id: 'ledger',
           label: t('nav.ledger'),

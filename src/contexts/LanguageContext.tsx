@@ -86,7 +86,9 @@ const en = {
   'nav.inventory': 'Inventory',
   'nav.employees': 'Employees',
   'nav.expenses': 'Expenses',
+  'nav.accounts': 'Accounts',
   'nav.ledger': 'Client Ledger Book',
+  'nav.reports': 'Reports',
   'nav.users': 'User Management',
   'nav.signOut': 'Sign Out',
   'nav.millOperator': 'Mill Operator',
@@ -99,6 +101,8 @@ const en = {
   'cta.addItem': 'Add Item',
   'cta.addExpense': 'Add Expense',
   'cta.addEmployee': 'Add Employee',
+  'cta.accountTransfer': 'Account Transfer',
+  'cta.printReport': 'Print Report',
 
   // Page Titles & Subtitles
   'page.overview.title': 'Dashboard Overview',
@@ -134,6 +138,12 @@ const en = {
   'page.ledger.title': 'Client Ledger Book',
   'page.ledger.subtitle':
     'Complete append-only register of opening dues, order bills, and payment receipts.',
+  'page.accounts.title': 'Accounts & Finance',
+  'page.accounts.subtitle':
+    'Live balances for Main Cash, Bank Account, and Mobile Banking with atomic inter-account transfers and unified account ledger.',
+  'page.reports.title': 'Financial Reports & Profit/Loss',
+  'page.reports.subtitle':
+    'Live Profit & Loss statement, 6-month revenue vs. expense trends, and Cash/Bank Book with running balances.',
   'page.users.title': 'User Management',
   'page.users.subtitle':
     'Assign Admin, Manager, or Accountant roles to control module access and master-data permissions.',
@@ -602,6 +612,8 @@ const bn: Record<TranslationKey, string> = {
   'nav.inventory': 'ইনভেন্টরি ও কেমিক্যাল',
   'nav.employees': 'কর্মচারী',
   'nav.expenses': 'খরচ ব্যবস্থাপনা',
+  'nav.accounts': 'অ্যাকাউন্টস ও ফিন্যান্স',
+  'nav.reports': 'আর্থিক রিপোর্ট ও লাভ-ক্ষতি',
   'nav.ledger': 'ক্লায়েন্ট খতিয়ান বই',
   'nav.users': 'ব্যবহারকারী ব্যবস্থাপনা',
   'nav.signOut': 'সাইন আউট',
@@ -615,6 +627,8 @@ const bn: Record<TranslationKey, string> = {
   'cta.addItem': 'আইটেম যোগ করুন',
   'cta.addExpense': 'খরচ যোগ করুন',
   'cta.addEmployee': 'কর্মচারী যোগ করুন',
+  'cta.accountTransfer': 'অ্যাকাউন্ট ট্রান্সফার',
+  'cta.printReport': 'রিপোর্ট প্রিন্ট',
 
   // Page Titles & Subtitles
   'page.overview.title': 'ড্যাশবোর্ড সারসংক্ষেপ',
@@ -650,6 +664,12 @@ const bn: Record<TranslationKey, string> = {
   'page.ledger.title': 'ক্লায়েন্ট খতিয়ান বই',
   'page.ledger.subtitle':
     'পূর্বের বকেয়া, অর্ডার বিল এবং জমার সম্পূর্ণ অপরিবর্তনীয় হিসাব তালিকা।',
+  'page.accounts.title': 'অ্যাকাউন্টস ও ফিন্যান্স',
+  'page.accounts.subtitle':
+    'মূল নগদ (ক্যাশ), ব্যাংক অ্যাকাউন্ট এবং মোবাইল ব্যাংকিং ব্যালেন্স, আন্তঃঅ্যাকাউন্ট ট্রান্সফার এবং সম্পূর্ণ অ্যাকাউন্ট খতিয়ান।',
+  'page.reports.title': 'আর্থিক রিপোর্ট ও লাভ-ক্ষতি (P&L)',
+  'page.reports.subtitle':
+    'নির্দিষ্ট সময়কালের লাভ-ক্ষতি হিসাব, ৬ মাসের আয় বনাম ব্যয় চার্ট এবং ক্যাশ ও ব্যাংক বুক।',
   'page.users.title': 'ব্যবহারকারী ব্যবস্থাপনা',
   'page.users.subtitle':
     'অ্যাডমিন, ম্যানেজার বা অ্যাকাউন্ট্যান্ট রোল নির্ধারণ করে মডিউল ও তথ্য সম্পাদনার অনুমতি নিয়ন্ত্রণ করুন।',

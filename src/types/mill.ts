@@ -21,7 +21,9 @@ export type NavSection =
   | 'inventory'
   | 'expenses'
   | 'employees'
+  | 'accounts'
   | 'ledger'
+  | 'reports'
   | 'overview'
   | 'users';
 
@@ -160,7 +162,10 @@ export interface OrderRecord {
 export interface MoneyInRecord {
   id: string;
   ownerId: string;
-  source?: 'client' | 'adjustment';
+  source?: 'client' | 'transfer' | 'adjustment';
+  category?: 'Transfer' | null;
+  transferId?: string;
+  counterAccount?: PaymentMethod | null;
   clientId: string;
   ledgerEntryId: string;
   reference: string;
@@ -213,14 +218,16 @@ export interface PurchaseRecord {
 export interface MoneyOutRecord {
   id: string;
   ownerId: string;
-  source: 'supplier' | 'expense' | 'advance' | 'salary' | 'adjustment';
+  source: 'supplier' | 'expense' | 'advance' | 'salary' | 'transfer' | 'adjustment';
   supplierId: string;
   ledgerEntryId: string;
   expenseId: string;
   employeeId: string;
   advanceId: string;
   salaryPaymentId: string;
-  category: ExpenseCategory | 'Employee Advance' | null;
+  transferId?: string;
+  counterAccount?: PaymentMethod | null;
+  category: ExpenseCategory | 'Employee Advance' | 'Transfer' | null;
   reference: string;
   amount: number;
   paymentDate: string;
