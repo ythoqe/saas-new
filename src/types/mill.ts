@@ -128,6 +128,15 @@ export interface UserProfile {
   updatedAt: Timestamp | null;
 }
 
+export interface AllowedUserRecord {
+  email: string;
+  role: UserRole;
+  invitedByUid: string;
+  invitedByEmail: string;
+  createdAt: Timestamp | null;
+  updatedAt: Timestamp | null;
+}
+
 export interface ClientRecord {
   id: string;
   ownerId: string;
@@ -478,6 +487,7 @@ export const USER_VALIDATION = {
   displayNameMax: 120,
   emailMin: 3,
   emailMax: 254,
+  emailPattern: /^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/,
 } as const;
 
 export const CHEQUE_VALIDATION = {

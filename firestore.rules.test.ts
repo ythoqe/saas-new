@@ -8,6 +8,7 @@ export interface AdversarialTestCase {
   id: number;
   name: string;
   collection:
+    | 'allowed_users'
     | 'app_meta'
     | 'users'
     | 'clients'
@@ -404,4 +405,28 @@ export const dirtyDozenTestCases: AdversarialTestCase[] = [
     },
     expected: 'PERMISSION_DENIED',
   },
+  {
+    id: 25,
+    name: 'Uninvited authenticated Google user attempting to list clients (not in allowed_users)',
+    collection: 'clients',
+    operation: 'list',
+    auth: { uid: 'uninvitedUid', email_verified: true },
+    expected: 'PERMISSION_DENIED',
+  },
+  {
+    id: 26,
+    name: 'Non-admin attempting to invite a user into allowed_users',
+    collection: 'allowed_users',
+    operation: 'create',
+    auth: { uid: 'managerUid', email_verified: true, role: 'manager' },
+    docId: 'friend@example.com',
+    payload: {
+      email: 'friend@example.com',
+      role: 'admin',
+      invitedByUid: 'managerUid',
+      invitedByEmail: 'manager@example.com',
+    },
+    expected: 'PERMISSION_DENIED',
+  },
 ];
+

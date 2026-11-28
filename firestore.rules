@@ -20,6 +20,13 @@ service cloud.firestore {
       return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
 
+    function isValidEmailKey(emailKey) {
+      return emailKey is string
+        && emailKey.size() >= 3
+        && emailKey.size() <= 254
+        && emailKey.matches('^[a-z0-9._%+\\-]+@[a-z0-9.\\-]+\\.[a-z]{2,}$');
+    }
+
     function incoming() {
       return request.resource.data;
     }
@@ -28,14 +35,28 @@ service cloud.firestore {
       return resource.data;
     }
 
-    // RBAC Role Helpers (Always verified from Firestore /users/{uid}, never client claims)
+    // RBAC & Invite-Only Allowlist Helpers (Verified from Firestore /allowed_users/{email} & /users/{uid})
     function isBootstrappedAdmin() {
       return isVerifiedUser()
         && request.auth.token.email == 'hmmojjammalhoq@gmail.com';
     }
 
-    function hasUserProfile() {
+    function hasAllowedUserDoc() {
       return isVerifiedUser()
+        && request.auth.token.email is string
+        && exists(/databases/$(database)/documents/allowed_users/$(request.auth.token.email.lower()));
+    }
+
+    function isAllowedUser() {
+      return isBootstrappedAdmin() || hasAllowedUserDoc();
+    }
+
+    function getAllowedUserRole() {
+      return get(/databases/$(database)/documents/allowed_users/$(request.auth.token.email.lower())).data.role;
+    }
+
+    function hasUserProfile() {
+      return isAllowedUser()
         && exists(/databases/$(database)/documents/users/$(request.auth.uid));
     }
 
@@ -44,16 +65,28 @@ service cloud.firestore {
     }
 
     function isAdmin() {
-      return isBootstrappedAdmin()
-        || (hasUserProfile() && getUserRole() == 'admin');
+      return isAllowedUser()
+        && (
+          isBootstrappedAdmin()
+          || (hasAllowedUserDoc() && getAllowedUserRole() == 'admin')
+          || (hasUserProfile() && getUserRole() == 'admin')
+        );
     }
 
     function isManager() {
-      return hasUserProfile() && getUserRole() == 'manager';
+      return isAllowedUser()
+        && (
+          (hasUserProfile() && getUserRole() == 'manager')
+          || (hasAllowedUserDoc() && getAllowedUserRole() == 'manager')
+        );
     }
 
     function isAccountant() {
-      return hasUserProfile() && getUserRole() == 'accountant';
+      return isAllowedUser()
+        && (
+          (hasUserProfile() && getUserRole() == 'accountant')
+          || (hasAllowedUserDoc() && getAllowedUserRole() == 'accountant')
+        );
     }
 
     function isAdminOrManager() {
@@ -140,6 +173,37 @@ service cloud.firestore {
         ])
         && isValidId(data.firstAdminUid)
         && data.initializedAt is timestamp;
+    }
+
+    // Validation Blueprint: AllowedUser entity (Invite-Only Email Allowlist)
+    function isValidAllowedUser(data) {
+      return data.keys().hasAll([
+          'email',
+          'role',
+          'invitedByUid',
+          'invitedByEmail',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'email',
+          'role',
+          'invitedByUid',
+          'invitedByEmail',
+          'createdAt',
+          'updatedAt'
+        ])
+        && isValidEmailKey(data.email)
+        && data.role is string
+        && data.role.size() >= 5
+        && data.role.size() <= 10
+        && data.role in ['admin', 'manager', 'accountant']
+        && isValidId(data.invitedByUid)
+        && data.invitedByEmail is string
+        && data.invitedByEmail.size() >= 3
+        && data.invitedByEmail.size() <= 254
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
     }
 
     // Validation Blueprint: Client entity
@@ -1295,10 +1359,64 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // Collection: /users/{userId} (User Profiles & RBAC Roles — PII Isolated to Self or Admin)
+    // Collection: /allowed_users/{emailKey} (Invite-Only Email Allowlist — Managed by Admin)
+    match /allowed_users/{emailKey} {
+      allow get: if isVerifiedUser()
+        && isValidEmailKey(emailKey)
+        && (
+          (request.auth.token.email is string && request.auth.token.email.lower() == emailKey)
+          || isAdmin()
+        );
+
+      allow list: if isAdmin();
+
+      allow create: if isVerifiedUser()
+        && isValidEmailKey(emailKey)
+        && isValidAllowedUser(incoming())
+        && incoming().email == emailKey
+        && incoming().invitedByUid == request.auth.uid
+        && incoming().invitedByEmail == request.auth.token.email
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin()
+          || (
+            // First-user bootstrap auto-registers first admin into allowed_users
+            request.auth.token.email is string
+            && emailKey == request.auth.token.email.lower()
+            && incoming().role == 'admin'
+            && !exists(/databases/$(database)/documents/app_meta/bootstrap)
+            && existsAfter(/databases/$(database)/documents/app_meta/bootstrap)
+            && getAfter(/databases/$(database)/documents/app_meta/bootstrap).data.firstAdminUid == request.auth.uid
+          )
+        );
+
+      allow update: if isVerifiedUser()
+        && isValidEmailKey(emailKey)
+        && isValidAllowedUser(incoming())
+        && isAdmin()
+        && incoming().email == existing().email
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'role',
+          'invitedByUid',
+          'invitedByEmail',
+          'updatedAt'
+        ]);
+
+      allow delete: if isVerifiedUser()
+        && isValidEmailKey(emailKey)
+        && isAdmin()
+        && emailKey != 'hmmojjammalhoq@gmail.com'
+        && !(request.auth.token.email is string && emailKey == request.auth.token.email.lower());
+    }
+
+    // Collection: /users/{userId} (User Profiles & RBAC Roles — Restricted to Invited Users Only)
     match /users/{userId} {
       allow get: if isVerifiedUser()
         && isValidId(userId)
+        && isAllowedUser()
         && (request.auth.uid == userId || isAdmin());
 
       allow list: if isAdmin();
@@ -1312,9 +1430,11 @@ service cloud.firestore {
         && incoming().createdAt == request.time
         && incoming().updatedAt == request.time
         && (
-          // Standard sign-up default role (cannot self-assign admin)
-          incoming().role == 'manager'
-          || (
+          (
+            // Invited User: email exists in allowed_users and role matches assigned role
+            hasAllowedUserDoc()
+            && incoming().role == getAllowedUserRole()
+          ) || (
             // First User Rule OR Runtime Bootstrapped Admin
             incoming().role == 'admin'
             && (
@@ -1330,6 +1450,7 @@ service cloud.firestore {
 
       allow update: if isVerifiedUser()
         && isValidId(userId)
+        && isAllowedUser()
         && isValidUserProfile(incoming())
         && incoming().uid == existing().uid
         && incoming().email == existing().email
@@ -1341,10 +1462,13 @@ service cloud.firestore {
             isAdmin()
             && incoming().diff(existing()).affectedKeys().hasOnly(['role', 'updatedAt'])
           ) || (
-            // Action 2: User refreshes their own displayName (role strictly locked)
+            // Action 2: User refreshes their own displayName or syncs their role from allowed_users
             request.auth.uid == userId
-            && incoming().role == existing().role
-            && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'updatedAt'])
+            && (
+              incoming().role == existing().role
+              || (hasAllowedUserDoc() && incoming().role == getAllowedUserRole())
+            )
+            && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'role', 'updatedAt'])
           )
         );
 

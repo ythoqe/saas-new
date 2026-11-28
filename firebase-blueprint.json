@@ -1055,6 +1055,51 @@
         "initializedAt"
       ]
     },
+    "AllowedUser": {
+      "title": "AllowedUser",
+      "description": "Invite-only allowlist entry indexed by lowercase email address. Only users present in allowed_users can access the app or read/write database data.",
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 254,
+          "format": "email"
+        },
+        "role": {
+          "type": "string",
+          "enum": ["admin", "manager", "accountant"]
+        },
+        "invitedByUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "invitedByEmail": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 254,
+          "format": "email"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "email",
+        "role",
+        "invitedByUid",
+        "invitedByEmail",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
     "Cheque": {
       "title": "Cheque",
       "description": "A client cheque instrument tracked through Pending, Endorsed to Supplier, Cleared (Self), Cleared (Supplier), or Bounced with atomic ledger and bank settlement.",
@@ -1197,9 +1242,13 @@
     }
   },
   "firestore": {
+    "/allowed_users/{emailKey}": {
+      "schema": { "$ref": "#/entities/AllowedUser" },
+      "description": "Invite-only email allowlist determining app access and assigned RBAC role (admin, manager, accountant). Self-readable by exact email match; listable and manageable only by admin."
+    },
     "/users/{userId}": {
       "schema": { "$ref": "#/entities/UserProfile" },
-      "description": "Stores user profiles and RBAC roles (admin, manager, accountant). Readable by self or admin; listable and role-updatable only by admin."
+      "description": "Stores user profiles and RBAC roles (admin, manager, accountant). Readable by self or admin (only when allowed in allowed_users); listable and role-updatable only by admin."
     },
     "/app_meta/{metaId}": {
       "schema": { "$ref": "#/entities/RbacBootstrap" },

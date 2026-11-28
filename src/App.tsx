@@ -8,6 +8,7 @@ import {
   onSnapshot,
   serverTimestamp,
   setDoc,
+  updateDoc,
   writeBatch,
 } from 'firebase/firestore';
 import {
@@ -90,6 +91,7 @@ import { SupplierManagementView } from './components/SupplierManagementView';
 import { UserManagementView } from './components/UserManagementView';
 import type {
   AdvancePaymentMethod,
+  AllowedUserRecord,
   ChequeRecord,
   ChequeStatus,
   ClientLedgerEntry,
@@ -153,6 +155,10 @@ function MillDashboardShell() {
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [userProfileLoaded, setUserProfileLoaded] = useState(false);
   const [registeredUsers, setRegisteredUsers] = useState<UserProfile[]>([]);
+  const [allowedUsers, setAllowedUsers] = useState<AllowedUserRecord[]>([]);
+  const [authAccessDeniedError, setAuthAccessDeniedError] = useState<
+    string | null
+  >(null);
 
   // Receivables & Orders state
   const [clients, setClients] = useState<ClientRecord[]>([]);
@@ -280,6 +286,7 @@ function MillDashboardShell() {
         setUserProfile(null);
         setUserProfileLoaded(false);
         setRegisteredUsers([]);
+        setAllowedUsers([]);
         setUsersLoaded(false);
         setClients([]);
         setLedgerEntries([]);
@@ -332,73 +339,139 @@ function MillDashboardShell() {
     return () => unsubscribe();
   }, []);
 
-  // User Profile Bootstrap (First User Rule) & Real-Time Role Sync
+  // Invite-Only Auth Check (allowed_users) & First-Admin Bootstrap
   useEffect(() => {
     if (!authReady || !user) return;
 
     let cancelled = false;
     let unsubUserDoc: (() => void) | null = null;
+    let unsubAllowedDoc: (() => void) | null = null;
     setUserProfileLoaded(false);
 
+    const denyAndSignOut = async () => {
+      if (cancelled) return;
+      setAuthAccessDeniedError(
+        'Access Denied. You are not invited. Please contact the Admin.'
+      );
+      setUserProfile(null);
+      setUserProfileLoaded(false);
+      await signOut(auth);
+    };
+
     const bootstrapAndListen = async () => {
+      const cleanEmail = (user.email ?? '').trim();
+      const emailKey = cleanEmail.toLowerCase();
+      const cleanDisplayName = (user.displayName ?? '').trim().slice(0, 120);
+
+      if (!emailKey) {
+        await denyAndSignOut();
+        return;
+      }
+
+      const isBootstrapped =
+        emailKey === BOOTSTRAPPED_ADMIN_EMAIL.toLowerCase();
+      const allowedDocRef = doc(db, 'allowed_users', emailKey);
       const userDocRef = doc(db, 'users', user.uid);
+
       try {
-        const existingSnap = await getDoc(userDocRef);
-        if (!existingSnap.exists()) {
-          const cleanEmail = (user.email ?? '').trim();
-          const cleanDisplayName = (user.displayName ?? '').trim().slice(0, 120);
-          const isBootstrapped =
-            cleanEmail.toLowerCase() === BOOTSTRAPPED_ADMIN_EMAIL.toLowerCase();
+        const allowedSnap = await getDoc(allowedDocRef);
+        let assignedRole: UserRole = 'manager';
+
+        if (!allowedSnap.exists()) {
+          // Check if this user is the primary/first Admin so we never get locked out
           const bootstrapRef = doc(db, 'app_meta', 'bootstrap');
           const bootstrapSnap = await getDoc(bootstrapRef);
 
           if (isBootstrapped || !bootstrapSnap.exists()) {
+            assignedRole = 'admin';
+            const existingUserSnap = await getDoc(userDocRef);
             const batch = writeBatch(db);
-            batch.set(userDocRef, {
-              uid: user.uid,
-              email: cleanEmail,
-              displayName: cleanDisplayName,
+
+            batch.set(allowedDocRef, {
+              email: emailKey,
               role: 'admin',
+              invitedByUid: user.uid,
+              invitedByEmail: cleanEmail,
               createdAt: serverTimestamp(),
               updatedAt: serverTimestamp(),
             });
+
+            if (!existingUserSnap.exists()) {
+              batch.set(userDocRef, {
+                uid: user.uid,
+                email: cleanEmail,
+                displayName: cleanDisplayName,
+                role: 'admin',
+                createdAt: serverTimestamp(),
+                updatedAt: serverTimestamp(),
+              });
+            }
+
             if (!bootstrapSnap.exists()) {
               batch.set(bootstrapRef, {
                 firstAdminUid: user.uid,
                 initializedAt: serverTimestamp(),
               });
             }
-            try {
-              await batch.commit();
-            } catch (batchErr) {
-              if (isBootstrapped) {
-                throw batchErr;
-              }
-              // Concurrent first-user race fallback: assign default manager role
-              await setDoc(userDocRef, {
-                uid: user.uid,
-                email: cleanEmail,
-                displayName: cleanDisplayName,
-                role: 'manager',
-                createdAt: serverTimestamp(),
-                updatedAt: serverTimestamp(),
-              });
-            }
+
+            await batch.commit();
           } else {
+            // Email does NOT exist in allowed_users -> sign out immediately
+            await denyAndSignOut();
+            return;
+          }
+        } else {
+          const allowedData = allowedSnap.data();
+          const rawAllowedRole = String(allowedData.role ?? 'manager');
+          assignedRole =
+            rawAllowedRole === 'admin' ||
+            rawAllowedRole === 'manager' ||
+            rawAllowedRole === 'accountant'
+              ? rawAllowedRole
+              : 'manager';
+
+          const existingUserSnap = await getDoc(userDocRef);
+          if (!existingUserSnap.exists()) {
             await setDoc(userDocRef, {
               uid: user.uid,
               email: cleanEmail,
               displayName: cleanDisplayName,
-              role: 'manager',
+              role: assignedRole,
               createdAt: serverTimestamp(),
               updatedAt: serverTimestamp(),
             });
+          } else {
+            const existingRole = String(existingUserSnap.data().role ?? '');
+            if (existingRole !== assignedRole) {
+              await setDoc(
+                userDocRef,
+                {
+                  uid: user.uid,
+                  email: cleanEmail,
+                  displayName:
+                    String(existingUserSnap.data().displayName ?? '') ||
+                    cleanDisplayName,
+                  role: assignedRole,
+                  createdAt: existingUserSnap.data().createdAt,
+                  updatedAt: serverTimestamp(),
+                }
+              );
+            }
           }
+        }
+
+        // Clear any old access denied message once verified in allowed_users
+        if (!cancelled) {
+          setAuthAccessDeniedError(null);
         }
       } catch (error) {
         if (!cancelled) {
           try {
-            handleFirestoreError(error, OperationType.WRITE, `users/${user.uid}`);
+            handleFirestoreError(
+              error,
+              OperationType.WRITE,
+              `allowed_users/${emailKey}`
+            );
           } catch (wrappedError) {
             setFatalError(
               wrappedError instanceof Error
@@ -411,6 +484,20 @@ function MillDashboardShell() {
       }
 
       if (cancelled) return;
+
+      // Real-time listener on allowed_users/{emailKey} so revoking an invite signs them out immediately
+      unsubAllowedDoc = onSnapshot(
+        allowedDocRef,
+        (allowedSnap) => {
+          if (cancelled) return;
+          if (!allowedSnap.exists() && !isBootstrapped) {
+            void denyAndSignOut();
+          }
+        },
+        () => {
+          // Ignore transient abort errors on sign-out
+        }
+      );
 
       unsubUserDoc = onSnapshot(
         userDocRef,
@@ -464,6 +551,9 @@ function MillDashboardShell() {
 
     return () => {
       cancelled = true;
+      if (unsubAllowedDoc) {
+        unsubAllowedDoc();
+      }
       if (unsubUserDoc) {
         unsubUserDoc();
       }
@@ -1111,6 +1201,35 @@ function MillDashboardShell() {
           (error) => handleListenerError(error, 'users')
         )
       );
+
+      unsubscribers.push(
+        onSnapshot(
+          collection(db, 'allowed_users'),
+          (snapshot) => {
+            setAllowedUsers(
+              snapshot.docs.map((docSnap) => {
+                const data = docSnap.data();
+                const rawRole = String(data.role ?? 'manager');
+                const parsedRole: UserRole =
+                  rawRole === 'admin' ||
+                  rawRole === 'manager' ||
+                  rawRole === 'accountant'
+                    ? rawRole
+                    : 'manager';
+                return {
+                  email: String(data.email ?? docSnap.id).toLowerCase(),
+                  role: parsedRole,
+                  invitedByUid: String(data.invitedByUid ?? ''),
+                  invitedByEmail: String(data.invitedByEmail ?? ''),
+                  createdAt: data.createdAt ?? null,
+                  updatedAt: data.updatedAt ?? null,
+                };
+              })
+            );
+          },
+          (error) => handleListenerError(error, 'allowed_users')
+        )
+      );
     } else {
       setEmployees([]);
       setEmployeesLoaded(true);
@@ -1119,6 +1238,7 @@ function MillDashboardShell() {
       setSalaryPayments([]);
       setSalaryPaymentsLoaded(true);
       setRegisteredUsers([]);
+      setAllowedUsers([]);
       setUsersLoaded(true);
     }
 
@@ -1362,7 +1482,12 @@ function MillDashboardShell() {
   }
 
   if (!user) {
-    return <AuthScreen />;
+    return (
+      <AuthScreen
+        externalError={authAccessDeniedError}
+        onClearExternalError={() => setAuthAccessDeniedError(null)}
+      />
+    );
   }
 
   const isDataLoading =
@@ -2045,7 +2170,7 @@ function MillDashboardShell() {
         expenseCount={expenses.length}
         employeeCount={employees.length}
         ledgerCount={ledgerEntries.length}
-        userCount={registeredUsers.length}
+        userCount={Math.max(allowedUsers.length, registeredUsers.length)}
         mobileOpen={mobileMenuOpen}
         onCloseMobile={() => setMobileMenuOpen(false)}
       />
@@ -2394,7 +2519,9 @@ function MillDashboardShell() {
           {activeSection === 'users' && isAdmin && (
             <UserManagementView
               users={registeredUsers}
+              allowedUsers={allowedUsers}
               currentUserUid={user.uid}
+              currentUserEmail={user.email ?? userProfile?.email ?? ''}
               isLoading={isDataLoading}
               onRoleUpdated={(message) => setToast({ message })}
             />

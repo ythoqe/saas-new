@@ -3,13 +3,22 @@ import { signInWithPopup } from 'firebase/auth';
 import { Layers, ShieldCheck, BookOpen, Users } from 'lucide-react';
 import { auth, googleProvider } from '../firebase';
 
-export function AuthScreen() {
+interface AuthScreenProps {
+  externalError?: string | null;
+  onClearExternalError?: () => void;
+}
+
+export function AuthScreen({
+  externalError = null,
+  onClearExternalError,
+}: AuthScreenProps) {
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
 
   const handleGoogleSignIn = async () => {
     setIsSigningIn(true);
     setAuthError(null);
+    onClearExternalError?.();
     try {
       await signInWithPopup(auth, googleProvider);
     } catch (error) {
@@ -22,6 +31,8 @@ export function AuthScreen() {
       setIsSigningIn(false);
     }
   };
+
+  const activeError = externalError || authError;
 
   return (
     <div className="min-h-screen bg-[#f7f8fa] flex flex-col lg:flex-row">
@@ -91,12 +102,12 @@ export function AuthScreen() {
             balances, and client ledger entries.
           </p>
 
-          {authError && (
+          {activeError && (
             <div
               role="alert"
-              className="mb-6 p-3.5 text-sm text-red-700 bg-red-50 border border-red-200 rounded-md"
+              className="mb-6 p-3.5 text-sm font-medium text-red-700 bg-red-50 border border-red-200 rounded-md"
             >
-              {authError}
+              {activeError}
             </div>
           )}
 

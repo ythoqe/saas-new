@@ -25,18 +25,26 @@
       - `employees`, `employee_advances`, `salary_payments`, `users` list/role updates: strictly `admin`.
       - Master Data edits/deletes (`clients`, `suppliers`, `inventory`, `employees`) and pending/processing transaction edits/deletes (`orders`, `purchases`): strictly `admin`.
 14. **Atomic Monthly Salary Payment & Double-Deduction Prevention**: `/salary_payments/{salaryId}` is append-only (`allow update, delete: if false`), strictly restricted to `admin`, enforces `reference == salaryId` matching `^SAL-[a-zA-Z0-9_\-]+$`, verifies arithmetic `abs(netSalary - (basicSalary + overtimeAmount + bonusAmount - advanceDeduction)) <= 0.02`, verifies `/employees/{employeeId}` exists, and when `netSalary > 0` requires bidirectional atomic creation (`existsAfter` / `getAfter`) of `/money_out/{salaryId}` with `category == "Salary"`, `reference == salaryId`, `salaryPaymentId == salaryId`, and `amount == netSalary`. Deducted advances are locked via `deducted == true` and cannot be reverted to `false` or re-deducted.
+15. **Invite-Only Allowlist Gate (`allowed_users`)**:
+    - `/allowed_users/{emailKey}` stores invited users keyed by lowercase email (`email`, `role` in `['admin', 'manager', 'accountant']`, `invitedByUid`, `invitedByEmail`, `createdAt`, `updatedAt`).
+    - Only users whose verified email exists in `/allowed_users/$(request.auth.token.email.lower())` (or the bootstrapped first admin during initial bootstrap) are considered `isAllowedUser()` and permitted to read or write any data in the database.
+    - Non-invited authenticated Google users cannot read or write `/users`, `/clients`, `/orders`, `/money_in`, `/money_out`, or any other mill collection, and cannot enumerate `/allowed_users` (`allow list: if isAdmin()`).
+    - Creating, updating roles in, or revoking `/allowed_users/{emailKey}` is strictly restricted to `isAdmin()` (with a one-time atomic first-user bootstrap exception when `/app_meta/bootstrap` does not yet exist).
 
 ## 2. Adversarial Payloads (Must All Return PERMISSION_DENIED)
-1. **Unauthenticated Read/Write** on `/users`, `/app_meta`, `/clients`, `/client_ledger`, `/orders`, `/expenses`, `/money_in`, `/money_out`, `/inventory`, `/stock_movements`, `/employees`, `/employee_advances`, or `/salary_payments`.
+1. **Unauthenticated Read/Write** on `/allowed_users`, `/users`, `/app_meta`, `/clients`, `/client_ledger`, `/orders`, `/expenses`, `/money_in`, `/money_out`, `/inventory`, `/stock_movements`, `/employees`, `/employee_advances`, or `/salary_payments`.
 2. **Unverified Email Spoofing** (`email_verified == false`, even with admin email).
-3. **Self-Assigned Admin Escalation** (a second user creating `/users/{uid}` with `role: "admin"` after `/app_meta/bootstrap` already exists, or a manager updating their own `/users/{uid}` `role` field to `"admin"`).
-4. **Non-Admin User Directory PII Read** (Manager or Accountant attempting `get` on another user's `/users/{otherUid}` or `list` on `/users`).
-5. **Manager Writing Cash Collections** (Manager attempting `create` or `read` on `/money_in`, `/money_out`, or `/expenses`).
-6. **Accountant Accessing Operations/Inventory/Payroll** (Accountant attempting `read` or `write` on `/orders`, `/purchases`, `/inventory`, `/stock_movements`, `/employees`, `/employee_advances`, or `/salary_payments`).
-7. **Non-Admin Master Data Edit/Delete** (Manager or Accountant attempting `update` or `delete` on `/clients`, `/suppliers`, `/orders` details, `/purchases` details, `/inventory` metadata, or `/employees`).
-8. **Identity Spoofing on Create** (`ownerId != request.auth.uid` or `users/{uid}` where `data.uid != request.auth.uid`).
-9. **Shadow Field Injection** (`balance` on `/clients`, `isSuperAdmin: true` on `/users`, or extra fields on any entity).
-10. **ID Poisoning & Backdated Timestamps** (`bad$id with spaces`, > 128 chars, or `createdAt != request.time`).
-11. **Bootstrap Tampering** (updating or deleting `/app_meta/bootstrap` or creating `/app_meta/other`).
-12. **Terminal State / Immutable Ledger Tampering** (updating a `Delivered` order or `Paid` purchase, mutating/deleting `client_ledger`, `supplier_ledger`, `money_in`, `money_out`, `expenses`, `stock_movements`, or `salary_payments`, or reverting an already-deducted `employee_advances` document).
-13. **Payroll Forgery & Non-Atomic Salary Payout** (forged `netSalary` mismatching `basicSalary + overtimeAmount + bonusAmount - advanceDeduction`, orphaned `SAL-*` `salary_payments` without atomic `money_out`, or marking an advance `deducted: true` without an atomic `salary_payments` document).
+3. **Uninvited Authenticated Google User Access** (an authenticated, email-verified user whose email is NOT in `/allowed_users` attempting to create `/users/{uid}`, read `/clients`, or list `/allowed_users`).
+4. **Non-Admin Inviting or Escalating in `/allowed_users`** (a Manager or Accountant attempting to create, update, or delete an `/allowed_users/{emailKey}` document).
+5. **Self-Assigned Admin Escalation** (a second user creating `/users/{uid}` with `role: "admin"` after `/app_meta/bootstrap` already exists, or a manager updating their own `/users/{uid}` `role` field to `"admin"`).
+6. **Non-Admin User Directory PII Read** (Manager or Accountant attempting `get` on another user's `/users/{otherUid}` or `list` on `/users` or `/allowed_users`).
+7. **Manager Writing Cash Collections** (Manager attempting `create` or `read` on `/money_in`, `/money_out`, or `/expenses`).
+8. **Accountant Accessing Operations/Inventory/Payroll** (Accountant attempting `read` or `write` on `/orders`, `/purchases`, `/inventory`, `/stock_movements`, `/employees`, `/employee_advances`, or `/salary_payments`).
+9. **Non-Admin Master Data Edit/Delete** (Manager or Accountant attempting `update` or `delete` on `/clients`, `/suppliers`, `/orders` details, `/purchases` details, `/inventory` metadata, or `/employees`).
+10. **Identity Spoofing on Create** (`ownerId != request.auth.uid` or `users/{uid}` where `data.uid != request.auth.uid`).
+11. **Shadow Field Injection** (`balance` on `/clients`, `isSuperAdmin: true` on `/users` or `/allowed_users`, or extra fields on any entity).
+12. **ID Poisoning & Backdated Timestamps** (`bad$id with spaces`, > 128 chars, or `createdAt != request.time`).
+13. **Bootstrap Tampering** (updating or deleting `/app_meta/bootstrap` or creating `/app_meta/other`).
+14. **Terminal State / Immutable Ledger Tampering** (updating a `Delivered` order or `Paid` purchase, mutating/deleting `client_ledger`, `supplier_ledger`, `money_in`, `money_out`, `expenses`, `stock_movements`, or `salary_payments`, or reverting an already-deducted `employee_advances` document).
+15. **Payroll Forgery & Non-Atomic Salary Payout** (forged `netSalary` mismatching `basicSalary + overtimeAmount + bonusAmount - advanceDeduction`, orphaned `SAL-*` `salary_payments` without atomic `money_out`, or marking an advance `deducted: true` without an atomic `salary_payments` document).
+
